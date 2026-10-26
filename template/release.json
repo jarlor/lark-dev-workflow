@@ -1,0 +1,73 @@
+{
+  "template_id": "lark-dev-workflow",
+  "template_version": "1.2.0",
+  "mapping_format_version": 2,
+  "source": {
+    "url": "https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg",
+    "base_token": "O2Tjbsrt7a1XorsQ9O1cKbtJnWg"
+  },
+  "copy_mode": "full_template",
+  "business_records": 0,
+  "schema_sha256": "584c5889ff064416cfb4882faa568fe027e2840010f04ebffde7d8d38b8c0372",
+  "compatibility": {
+    "skill": "lark-dev-workflow",
+    "binding_formats_read": [
+      1,
+      2
+    ],
+    "binding_format_generated": 2
+  },
+  "validation_status": "comments_and_light_collaboration_validated_with_single_user",
+  "validated_on": "2026-10-26",
+  "validation_scope": [
+    "actual_full_template_copy",
+    "two_same_name_projects_and_versions",
+    "live_project_record_binding_both_projects",
+    "project_document_sections_and_cross_project_rejection",
+    "shared_and_project_views_coexist",
+    "unassigned_feedback_intake_and_unknown_project_isolation",
+    "three_actual_form_submissions_and_readback",
+    "native_bidirectional_pairs",
+    "requirement_revision_snapshot_preservation",
+    "duplicate_bug_non_fix_disposition",
+    "source_verification_without_delivery",
+    "stable_key_no_duplicate_records",
+    "binding_repeat_and_refresh_protection",
+    "complete_comment_and_reply_reads",
+    "stable_source_key_and_formal_intake_dedup",
+    "same_source_edit_preserves_history",
+    "real_resolve_restore_reappears_pending",
+    "local_observation_ack_separation",
+    "context_change_reporting_and_timestamp_dedup",
+    "verified_user_claim_start_block_complete_retains_owner"
+  ],
+  "automated_tests_passed": 66,
+  "source_form_enabled": false,
+  "not_validated": [
+    "real_product_bug_fix_failed_retest_then_pass",
+    "multi_environment_release_lifecycle",
+    "production_delivery",
+    "other_accounts_or_tenants",
+    "two_real_accounts_concurrent_claim_and_handoff",
+    "windows_live_runtime"
+  ],
+  "source_display_name": "Agent研发工作流｜v1.0",
+  "validation_history": {
+    "1.1.0": {
+      "independent_checks_passed": 15,
+      "independent_fresh_read_calls": 11,
+      "scope": "multi_project_onboarding_and_business_examples"
+    },
+    "1.2.0": {
+      "onboarding_tests": 38,
+      "comment_tests": 28,
+      "live_comment_resources": 3,
+      "live_comment_threads": 4,
+      "live_comment_interactions": 5,
+      "live_user_accounts": 1,
+      "live_shared_source_rows_after_retries": 1,
+      "independent_review": "targeted_probes_and_live_read_only_scan_plus_final_incremental_checks"
+    }
+  },
+  "comment_reader_sha256": "0525b50d1cc515a756972368d2ddd2ccb672b42190b8e7efcee262f4f4b3a991"
+}

@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+.authoring/
+instances/
+.lark-dev-workflow/
+dist/
+.DS_Store
+.agents/
+.codex/
+skills-lock.json
+.env
+.env.*

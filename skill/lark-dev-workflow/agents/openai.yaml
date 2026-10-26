@@ -1,0 +1,4 @@
+interface:
+  display_name: "飞书研发工作流"
+  short_description: "接入飞书研发模板，维护反馈、需求、Bug、验收、发布与待办台账"
+  default_prompt: "使用 $lark-dev-workflow 接入我的飞书研发台账，核对项目绑定、维护责任和可用流程。"

@@ -1,0 +1,2313 @@
+{
+  "template_id": "lark-dev-workflow",
+  "template_version": "1.2.0",
+  "mapping_format_version": 2,
+  "tables": {
+    "feedback": {
+      "name": "00 反馈收集",
+      "fields": {
+        "title": {
+          "name": "一句话反馈",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "FB-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "original": {
+          "name": "原始说明",
+          "type": "text",
+          "description": "保留原文、背景及附件；整理后的结论写处理摘要。"
+        },
+        "source": {
+          "name": "来源链接",
+          "type": "text",
+          "description": "原始评论、回复、页面或消息的可追溯链接；项目归属核验真实记录或章节，不按引文猜测。使用纯文本以兼容反馈表单。",
+          "style": {
+            "type": "plain"
+          }
+        },
+        "source_event_key": {
+          "name": "来源事件键",
+          "type": "text",
+          "description": "原样保存采集器来源键 type:token/comment:comment_id/reply:reply_id；真实资源类型、token及评论/回复ID组成，不随处理人、Base引用、项目分流或内容编辑变化。正式创建前在共享 Base 查重；内容修订另行保留，不把本地已见当作业务已处理。"
+        },
+        "author": {
+          "name": "原始作者",
+          "type": "text",
+          "description": "保留原始作者真实身份与显示名；操作账号、代录者不替代原作者。本人账号的 Agent 代发或演练也显示人的身份，不能据此作为人类确认。"
+        },
+        "received_at": {
+          "name": "收到时间",
+          "type": "datetime",
+          "style": {
+            "format": "yyyy-MM-dd HH:mm"
+          },
+          "description": "原始反馈发生或收到的时间，不编造缺失时间。"
+        },
+        "attachments": {
+          "name": "截图附件",
+          "type": "attachment"
+        },
+        "status": {
+          "name": "处理状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待受理"
+            },
+            {
+              "name": "待补充"
+            },
+            {
+              "name": "已转办"
+            },
+            {
+              "name": "已归并"
+            },
+            {
+              "name": "已答复"
+            },
+            {
+              "name": "已撤回"
+            }
+          ],
+          "description": "待受理：尚未分类；待补充：缺具体信息；已转办：已有真实承接项；已归并：指向唯一主反馈；已答复：咨询已处理；已撤回：有撤回依据。",
+          "default_value": [
+            "待受理"
+          ]
+        },
+        "summary": {
+          "name": "处理摘要",
+          "type": "text",
+          "description": "一句话处置结果；已转办不表示已解决。"
+        },
+        "requirements": {
+          "name": "关联需求",
+          "type": "link",
+          "target_role": "requirements",
+          "bidirectional": true,
+          "description": "本反馈形成或补充的需求。原生双向关联至 01 需求 / 来源反馈；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "requirements.feedback"
+        },
+        "bugs": {
+          "name": "关联Bug",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": true,
+          "description": "本反馈形成或补充的 Bug。原生双向关联至 02 Bug / 来源反馈；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "bugs.feedback"
+        },
+        "work": {
+          "name": "关联研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": true,
+          "description": "明确授权维护或交付工作等直接承接项。原生双向关联至 03 研发项 / 来源反馈；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "work.feedback"
+        },
+        "merged_into": {
+          "name": "归并到",
+          "type": "link",
+          "target_role": "feedback",
+          "bidirectional": false,
+          "description": "完全重复时指向唯一主反馈；不得循环。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "反馈的项目归属；不按标题猜归属。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "human_action": {
+          "name": "需人介入",
+          "type": "checkbox",
+          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        },
+        "project_input": {
+          "name": "反馈项目",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待确认项目"
+            }
+          ],
+          "description": "提交者选择的原始项目线索；选项为 06 实际编号 · 项目名称。受理者按编号解析真实项目 record ID 后写所属项目；待确认项目不自动归属，不按当前仓库或同名标题猜测。无默认值。",
+          "default_value": null
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "summary",
+        "human_action",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待受理",
+                  "待补充"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "需人介入",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "human_action",
+                "==",
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已转办",
+                  "已归并",
+                  "已答复",
+                  "已撤回"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "requirements": {
+      "name": "01 需求",
+      "fields": {
+        "title": {
+          "name": "需求标题",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "REQ-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待补充"
+            },
+            {
+              "name": "待确认"
+            },
+            {
+              "name": "可研发"
+            },
+            {
+              "name": "研发中"
+            },
+            {
+              "name": "待验收"
+            },
+            {
+              "name": "已验收"
+            },
+            {
+              "name": "已撤回"
+            },
+            {
+              "name": "暂停"
+            }
+          ],
+          "description": "待补充：范围信息不足；待确认：具体修订未确认；可研发：确认且前置满足；研发中：实际执行；待验收：等待必要验收；已验收：适用验收点均满足；已撤回/暂停：保留决定与恢复条件。",
+          "default_value": [
+            "待确认"
+          ]
+        },
+        "scope": {
+          "name": "目标与范围",
+          "type": "text",
+          "description": "说明目标、包含与不包含范围；长说明放详情文档稳定章节。 重大修改先保留旧修订的完整范围与 AC，再递增需求修订；未确认新修订不得沿用旧确认。"
+        },
+        "criteria": {
+          "name": "验收标准",
+          "type": "text",
+          "description": "可观察的验收点，标注适用修订；长内容链接稳定章节。 重大修改先保留旧修订的完整范围与 AC，再递增需求修订；未确认新修订不得沿用旧确认。"
+        },
+        "revision": {
+          "name": "需求修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "default_value": 1
+        },
+        "confirmed_revision": {
+          "name": "已确认修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "description": "实际已确认的修订号；未确认留空，不因创建自动填入。"
+        },
+        "confirmation": {
+          "name": "确认依据",
+          "type": "text",
+          "description": "确认者真实身份、时间、原始人类指令、适用内容修订及来源链接。明确且唯一范围的用户执行指令可作为依据；Agent 代发、回执或演练不能制造人类确认。"
+        },
+        "details": {
+          "name": "需求详情",
+          "type": "text",
+          "description": "需求与 Bug 说明中的稳定章节链接。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "summary": {
+          "name": "进展摘要",
+          "type": "text",
+          "description": "已满足范围、未完成点及适用证据。"
+        },
+        "feedback": {
+          "name": "来源反馈",
+          "type": "link",
+          "target_role": "feedback",
+          "bidirectional": true,
+          "description": "保留原始反馈来源。原生双向关联至 00 反馈收集 / 关联需求；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "feedback.requirements"
+        },
+        "work": {
+          "name": "关联研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": true,
+          "description": "承接已确认范围的实际工作。原生双向关联至 03 研发项 / 关联需求；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "work.requirements"
+        },
+        "verification": {
+          "name": "验收记录",
+          "type": "link",
+          "target_role": "verification",
+          "bidirectional": true,
+          "description": "覆盖当前适用验收点的真实验证。原生双向关联至 04 测试与验收 / 关联需求；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "verification.requirements"
+        },
+        "merged_into": {
+          "name": "归并到",
+          "type": "link",
+          "target_role": "requirements",
+          "bidirectional": false,
+          "description": "范围完全重复时指向唯一主需求，保留原来源。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "记录的项目归属；查询和写入均检查项目范围。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "version": {
+          "name": "目标版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "约定交付批次；关联版本须属于同一项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "human_action": {
+          "name": "需人介入",
+          "type": "checkbox",
+          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "summary",
+        "human_action",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待补充",
+                  "待确认",
+                  "可研发",
+                  "研发中",
+                  "暂停"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "需人介入",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "human_action",
+                "==",
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待验收",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待验收"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已验收",
+                  "已撤回"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "bugs": {
+      "name": "02 Bug",
+      "fields": {
+        "title": {
+          "name": "Bug标题",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "BUG-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待核实"
+            },
+            {
+              "name": "待复现"
+            },
+            {
+              "name": "待修复"
+            },
+            {
+              "name": "修复中"
+            },
+            {
+              "name": "待复测"
+            },
+            {
+              "name": "已关闭"
+            },
+            {
+              "name": "阻塞"
+            },
+            {
+              "name": "暂停"
+            },
+            {
+              "name": "无需修复"
+            }
+          ],
+          "description": "待核实：预期或异常尚不明确；待复现：缺适用复现；待修复：已复现；修复中：实际修复；待复测：已交付候选构建；已关闭：适用构建独立复测通过；阻塞：当前动作受阻；暂停：有暂停决定。 无需修复：非缺陷、重复、撤回或有权决定不修；处理摘要保留依据。重复必须关联唯一主 Bug。无法复现不等于无需修复。",
+          "default_value": [
+            "待核实"
+          ]
+        },
+        "expected": {
+          "name": "预期行为",
+          "type": "text",
+          "description": "已有需求、契约或明确预期及依据；新能力走需求。"
+        },
+        "actual": {
+          "name": "实际异常",
+          "type": "text",
+          "description": "可观察的实际行为和影响。"
+        },
+        "conditions": {
+          "name": "触发条件",
+          "type": "text",
+          "description": "复现步骤、输入、必要账号/数据条件；不存凭据。"
+        },
+        "baseline": {
+          "name": "复现基线",
+          "type": "text",
+          "description": "复现适用的环境和完整构建或源码版本；未知明确未知。"
+        },
+        "candidate_build": {
+          "name": "候选构建",
+          "type": "text",
+          "description": "交付修复的不可变构建或数据制品标识。"
+        },
+        "details": {
+          "name": "Bug详情",
+          "type": "text",
+          "description": "需求与 Bug 说明中的稳定章节链接。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "summary": {
+          "name": "处理摘要",
+          "type": "text",
+          "description": "当前事实、复现/修复/复测结论及剩余范围。"
+        },
+        "feedback": {
+          "name": "来源反馈",
+          "type": "link",
+          "target_role": "feedback",
+          "bidirectional": true,
+          "description": "原始问题反馈。原生双向关联至 00 反馈收集 / 关联Bug；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "feedback.bugs"
+        },
+        "work": {
+          "name": "修复研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": true,
+          "description": "实际修复工作。原生双向关联至 03 研发项 / 关联Bug；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "work.bugs"
+        },
+        "discovery_tests": {
+          "name": "发现测试",
+          "type": "link",
+          "target_role": "verification",
+          "bidirectional": true,
+          "description": "发现该异常的真实执行；用户直接反馈可空。原生双向关联至 04 测试与验收 / 发现Bug；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "verification.discovered_bugs"
+        },
+        "reproduction_tests": {
+          "name": "复现测试",
+          "type": "link",
+          "target_role": "verification",
+          "bidirectional": true,
+          "description": "证明已有预期与异常的适用复现。原生双向关联至 04 测试与验收 / 复现Bug；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "verification.reproduced_bugs"
+        },
+        "retest_tests": {
+          "name": "修复后复测",
+          "type": "link",
+          "target_role": "verification",
+          "bidirectional": true,
+          "description": "针对候选构建的每次独立复测，失败记录保留。原生双向关联至 04 测试与验收 / 复测Bug；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "verification.retested_bugs"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "记录的项目归属；查询和写入均检查项目范围。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "version": {
+          "name": "目标版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "约定交付批次；关联版本须属于同一项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "human_action": {
+          "name": "需人介入",
+          "type": "checkbox",
+          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        },
+        "merged_into": {
+          "name": "归并到",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": false,
+          "description": "重复报告指向同项目唯一主 Bug，保留原证据；不得自指或循环。无需修复的重复处置必须填写此关系。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "summary",
+        "human_action",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待核实",
+                  "待复现",
+                  "待修复",
+                  "修复中",
+                  "阻塞",
+                  "暂停"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "需人介入",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "human_action",
+                "==",
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待验收",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待复测"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已关闭",
+                  "无需修复"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "work": {
+      "name": "03 研发项",
+      "fields": {
+        "title": {
+          "name": "工作标题",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "DEV-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待处理"
+            },
+            {
+              "name": "进行中"
+            },
+            {
+              "name": "等待前置"
+            },
+            {
+              "name": "阻塞"
+            },
+            {
+              "name": "已交付"
+            },
+            {
+              "name": "已完成"
+            },
+            {
+              "name": "暂停"
+            },
+            {
+              "name": "已转交"
+            },
+            {
+              "name": "已取消"
+            }
+          ],
+          "description": "待处理：尚未开始；进行中：实际执行；等待前置：有未完成依赖研发项；阻塞：环境/资料等阻止动作；已交付：已提供产物待核对；已完成：约定交付已核对；暂停/已转交：保留决定与承接。 已取消：有明确取消决定，保留依据、原范围、已完成成果与未完成点；不覆盖交付或失败事实。",
+          "default_value": [
+            "待处理"
+          ]
+        },
+        "owner": {
+          "name": "负责人",
+          "type": "user",
+          "multiple": false,
+          "description": "当前工作主承接者，保存真实用户 ID。沿用项目分配规则；接手先读最新负责人，写后读回；阻塞、暂停或久未更新不自动释放。交接保留原／新身份、决定及剩余范围；完成后保留负责人。"
+        },
+        "scope": {
+          "name": "工作范围",
+          "type": "text",
+          "description": "冻结本项已授权范围：写 REQ编号/rN、适用 AC 和内容快照或不可覆盖的修订章节链接；不得只链接会变动的最新需求。需求重大变更先重新确认适用范围。"
+        },
+        "deliverable": {
+          "name": "约定交付物",
+          "type": "text",
+          "description": "明确本项交付物；提供产物不自动代表上游验收或发布。"
+        },
+        "verification_plan": {
+          "name": "验证方式",
+          "type": "text",
+          "description": "约定的交付核对及必要验证。"
+        },
+        "summary": {
+          "name": "交付与进展",
+          "type": "text",
+          "description": "当前实际进展、产物与未完成范围；交接时保留原／新负责人真实身份、决定来源、已完成产物、剩余范围及在途动作边界，不覆盖既有历史。"
+        },
+        "requirements": {
+          "name": "关联需求",
+          "type": "link",
+          "target_role": "requirements",
+          "bidirectional": true,
+          "description": "承接的已确认需求范围。原生双向关联至 01 需求 / 关联研发项；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "requirements.work"
+        },
+        "bugs": {
+          "name": "关联Bug",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": true,
+          "description": "承接已复现的 Bug 修复。原生双向关联至 02 Bug / 修复研发项；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "bugs.work"
+        },
+        "feedback": {
+          "name": "来源反馈",
+          "type": "link",
+          "target_role": "feedback",
+          "bidirectional": true,
+          "description": "直接授权的维护或交付来源。原生双向关联至 00 反馈收集 / 关联研发项；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "feedback.work"
+        },
+        "dependencies": {
+          "name": "依赖研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": false,
+          "description": "真正阻止当前工作的未完成项；等待前置必须有此关联。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "记录的项目归属；查询和写入均检查项目范围。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "version": {
+          "name": "目标版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "约定交付批次；关联版本须属于同一项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "human_action": {
+          "name": "需人介入",
+          "type": "checkbox",
+          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "owner",
+        "summary",
+        "human_action",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待处理",
+                  "进行中",
+                  "等待前置",
+                  "阻塞",
+                  "暂停",
+                  "已转交"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "需人介入",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "human_action",
+                "==",
+                true
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待验收",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已交付"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已完成",
+                  "已取消"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "verification": {
+      "name": "04 测试与验收",
+      "fields": {
+        "title": {
+          "name": "验证标题",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "TEST-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "purpose": {
+          "name": "测试目的",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "问题发现"
+            },
+            {
+              "name": "Bug复现"
+            },
+            {
+              "name": "研发自测"
+            },
+            {
+              "name": "需求验收"
+            },
+            {
+              "name": "Bug复测"
+            },
+            {
+              "name": "交付验证"
+            }
+          ],
+          "description": "为什么执行；发现、复现、修复后复测分别建立关系。"
+        },
+        "method": {
+          "name": "验证方式",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "界面操作"
+            },
+            {
+              "name": "接口验证"
+            },
+            {
+              "name": "自动化测试"
+            },
+            {
+              "name": "源码检查"
+            },
+            {
+              "name": "人工核验"
+            }
+          ],
+          "description": "如何执行；方法和环境标签不证明独立性。"
+        },
+        "result": {
+          "name": "结果",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "未执行"
+            },
+            {
+              "name": "通过"
+            },
+            {
+              "name": "部分通过"
+            },
+            {
+              "name": "失败"
+            },
+            {
+              "name": "受阻"
+            },
+            {
+              "name": "待核实"
+            }
+          ],
+          "description": "未执行：计划；通过：声明必要范围已满足；部分通过：保留缺口；失败：保留可观察失败；受阻：说明未执行步骤；待核实：证据尚不足。",
+          "default_value": [
+            "未执行"
+          ]
+        },
+        "criteria_snapshot": {
+          "name": "标准快照",
+          "type": "text",
+          "description": "本次目的、范围、验收点、适用需求修订或契约版本。"
+        },
+        "environment": {
+          "name": "环境",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "本地"
+            },
+            {
+              "name": "测试"
+            },
+            {
+              "name": "预发布"
+            },
+            {
+              "name": "生产"
+            },
+            {
+              "name": "未知"
+            }
+          ],
+          "description": "实际执行或交付环境；环境未知时明确未知，不以测试环境结果代替生产。"
+        },
+        "build": {
+          "name": "构建标识",
+          "type": "text",
+          "description": "完整提交、镜像摘要或固定数据制品；分支名和日期不能替代。"
+        },
+        "executor": {
+          "name": "执行者",
+          "type": "text",
+          "description": "真实执行的人或会话标识。"
+        },
+        "independence": {
+          "name": "独立性依据",
+          "type": "text",
+          "description": "说明执行者与实现者的关系及依据；自测不得标为独立验收。"
+        },
+        "executed_at": {
+          "name": "执行时间",
+          "type": "datetime",
+          "style": {
+            "format": "yyyy-MM-dd HH:mm"
+          },
+          "description": "真实执行时间；未执行不填写。"
+        },
+        "summary": {
+          "name": "结论摘要",
+          "type": "text",
+          "description": "通过范围、失败/未执行点及下一步。"
+        },
+        "evidence": {
+          "name": "验证证据",
+          "type": "text",
+          "description": "简洁结果、必要截图和稳定证据链接；原始日志存 Git/CI/构建存储。"
+        },
+        "requirements": {
+          "name": "关联需求",
+          "type": "link",
+          "target_role": "requirements",
+          "bidirectional": true,
+          "description": "本次覆盖的需求及适用修订。原生双向关联至 01 需求 / 验收记录；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "requirements.verification"
+        },
+        "work": {
+          "name": "验收研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": false,
+          "description": "本次核对的研发交付。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "discovered_bugs": {
+          "name": "发现Bug",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": true,
+          "description": "本次执行新发现的异常。原生双向关联至 02 Bug / 发现测试；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "bugs.discovery_tests"
+        },
+        "reproduced_bugs": {
+          "name": "复现Bug",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": true,
+          "description": "本次证明可复现的异常。原生双向关联至 02 Bug / 复现测试；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "bugs.reproduction_tests"
+        },
+        "retested_bugs": {
+          "name": "复测Bug",
+          "type": "link",
+          "target_role": "bugs",
+          "bidirectional": true,
+          "description": "本次对修复候选构建进行复测的 Bug。原生双向关联至 02 Bug / 修复后复测；只维护一端，另一端自动同步，写后核对两端实际记录。",
+          "reverse_field": "bugs.retest_tests"
+        },
+        "delivery": {
+          "name": "关联交付",
+          "type": "link",
+          "target_role": "delivery",
+          "bidirectional": true,
+          "description": "该验证实际关联的交付执行；原生双向关联至 05 交付与发布 / 验收记录。源码或 CI 验证可仅填固定构建而不造交付记录。",
+          "reverse_field": "delivery.verification"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "记录的项目归属；查询和写入均检查项目范围。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "version": {
+          "name": "目标版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "约定交付批次；关联版本须属于同一项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "purpose",
+        "result",
+        "environment",
+        "build",
+        "summary"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待执行",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "result",
+                "intersects",
+                [
+                  "未执行",
+                  "受阻",
+                  "待核实"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "未通过",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "result",
+                "intersects",
+                [
+                  "部分通过",
+                  "失败"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已完成",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "result",
+                "intersects",
+                [
+                  "通过"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "delivery": {
+      "name": "05 交付与发布",
+      "fields": {
+        "title": {
+          "name": "交付标题",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "REL-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "nature": {
+          "name": "记录性质",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "当前工作"
+            },
+            {
+              "name": "历史记录"
+            },
+            {
+              "name": "示例"
+            }
+          ],
+          "description": "当前工作纳入推进；历史记录保留证据，不授权恢复执行；示例不计入业务统计。",
+          "default_value": [
+            "当前工作"
+          ]
+        },
+        "kind": {
+          "name": "交付类型",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "代码"
+            },
+            {
+              "name": "数据"
+            },
+            {
+              "name": "配置"
+            }
+          ],
+          "description": "代码保留实际部署运行；数据/配置使用固定制品标识与验证，不编造部署。"
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "待交付"
+            },
+            {
+              "name": "进行中"
+            },
+            {
+              "name": "已完成"
+            },
+            {
+              "name": "部分完成"
+            },
+            {
+              "name": "失败"
+            },
+            {
+              "name": "已回滚"
+            },
+            {
+              "name": "待核实"
+            },
+            {
+              "name": "已取消"
+            }
+          ],
+          "description": "待交付：尚未执行；进行中：实际交付中；已完成：指定环境交付及必要验证满足；部分完成：保留步骤缺口；失败/已回滚：保留事实；待核实：证据不齐。 已取消：取消尚未执行的交付计划并保留依据；已执行、失败或回滚记录保留原事实，不能改成取消。",
+          "default_value": [
+            "待交付"
+          ]
+        },
+        "repository": {
+          "name": "主仓库或制品源",
+          "type": "text",
+          "description": "每行一个主仓库或数据/配置制品来源，多仓分别记录。"
+        },
+        "build": {
+          "name": "构建标识",
+          "type": "text",
+          "description": "一个不可变提交、镜像摘要或数据/配置制品版本；本行另由环境、交付时间区分执行，不把同一制品的多次执行混在一行。"
+        },
+        "environment": {
+          "name": "环境",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "本地"
+            },
+            {
+              "name": "测试"
+            },
+            {
+              "name": "预发布"
+            },
+            {
+              "name": "生产"
+            },
+            {
+              "name": "未知"
+            }
+          ],
+          "description": "实际执行或交付环境；环境未知时明确未知，不以测试环境结果代替生产。"
+        },
+        "pull_request": {
+          "name": "主PR或提交",
+          "type": "text",
+          "description": "实际主 PR 或完整提交链接。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "deployment_run": {
+          "name": "部署运行",
+          "type": "text",
+          "description": "该环境实际部署运行的链接；普通 CI 不是部署。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "executed_at": {
+          "name": "交付时间",
+          "type": "datetime",
+          "style": {
+            "format": "yyyy-MM-dd HH:mm"
+          },
+          "description": "实际交付执行时间；相同制品重复执行保留不同执行记录。"
+        },
+        "summary": {
+          "name": "交付摘要",
+          "type": "text",
+          "description": "实际代码/数据/配置步骤结果及剩余范围。"
+        },
+        "evidence": {
+          "name": "验证与回滚依据",
+          "type": "text",
+          "description": "必要验证、回滚条件及稳定证据链接。"
+        },
+        "authority": {
+          "name": "适用授权依据",
+          "type": "text",
+          "description": "按项目约定保留本次环境/数据/付费操作等已有授权；台账记录不产生授权。"
+        },
+        "work": {
+          "name": "包含研发项",
+          "type": "link",
+          "target_role": "work",
+          "bidirectional": false,
+          "description": "本次交付包含的实际研发成果。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "verification": {
+          "name": "验收记录",
+          "type": "link",
+          "target_role": "verification",
+          "bidirectional": true,
+          "description": "适用本次制品、环境及执行的验证；原生双向关联至 04 / 关联交付。一次交付一行，同一制品跨环境或重试分行。",
+          "reverse_field": "verification.delivery"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "记录的项目归属；查询和写入均检查项目范围。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "version": {
+          "name": "目标版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "约定交付批次；关联版本须属于同一项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "environment",
+        "build",
+        "summary"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": [
+          [
+            "nature",
+            "intersects",
+            [
+              "当前工作"
+            ]
+          ]
+        ]
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待交付",
+                  "进行中",
+                  "部分完成",
+                  "待核实"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "已完成",
+                  "已回滚",
+                  "已取消"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "失败记录",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "失败"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "projects": {
+      "name": "06 项目",
+      "fields": {
+        "title": {
+          "name": "项目名称",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "PRJ-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "准备中"
+            },
+            {
+              "name": "进行中"
+            },
+            {
+              "name": "已交付"
+            },
+            {
+              "name": "暂停"
+            },
+            {
+              "name": "归档"
+            }
+          ],
+          "description": "准备中：范围/接入准备；进行中：有当前工作；已交付：约定范围满足；暂停/归档：保留未完成范围与决定。",
+          "default_value": [
+            "准备中"
+          ]
+        },
+        "owner": {
+          "name": "项目负责人",
+          "type": "user",
+          "multiple": false,
+          "description": "项目层面的责任人，不自动等于各研发项负责人或当前操作账号。本人登录只证明操作身份，不授予项目分配权。"
+        },
+        "scope": {
+          "name": "项目范围",
+          "type": "text",
+          "description": "说明项目目标和边界，供记录归属与统计使用。"
+        },
+        "summary": {
+          "name": "项目摘要",
+          "type": "text",
+          "description": "里程碑或用户询问时按必要范围、验收与交付汇总；不逐条变更机械复制明细，单项完成不表示项目完成。"
+        },
+        "current_version": {
+          "name": "当前重点版本",
+          "type": "link",
+          "target_role": "versions",
+          "bidirectional": false,
+          "description": "当前重点交付批次；应属于本项目。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "requirements_doc": {
+          "name": "需求与Bug文档",
+          "type": "text",
+          "description": "本项目专属内容入口：共享文档的真实项目章节 URL#block_id，或本项目独立文档 URL。首次接入绑定该链接；不同项目共享同一文档时使用不同章节，不能只按文档名称定位。 共享章节标题含实际 PRJ 编号以核对归属；绑定刷新时文档 token 与章节 anchor 均不可静默改变。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "evidence_doc": {
+          "name": "测试与交付文档",
+          "type": "text",
+          "description": "本项目专属内容入口：共享文档的真实项目章节 URL#block_id，或本项目独立文档 URL。首次接入绑定该链接；不同项目共享同一文档时使用不同章节，不能只按文档名称定位。 共享章节标题含实际 PRJ 编号以核对归属；绑定刷新时文档 token 与章节 anchor 均不可静默改变。",
+          "style": {
+            "type": "url"
+          }
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "当前项目层面需要推进的动作与承接者。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "status",
+        "owner",
+        "summary",
+        "current_version",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": []
+      },
+      "quick_group": [],
+      "action_views": [
+        {
+          "name": "进行中",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "status",
+                "intersects",
+                [
+                  "准备中",
+                  "进行中"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    },
+    "versions": {
+      "name": "07 版本",
+      "fields": {
+        "title": {
+          "name": "版本名称",
+          "type": "text"
+        },
+        "number": {
+          "name": "编号",
+          "type": "auto_number",
+          "style": {
+            "rules": [
+              {
+                "type": "text",
+                "text": "VER-"
+              },
+              {
+                "type": "incremental_number",
+                "length": 4
+              }
+            ]
+          },
+          "description": "系统生成的展示编号；关联与去重分别使用真实 record ID 和记录键。"
+        },
+        "key": {
+          "name": "记录键",
+          "type": "text",
+          "description": "新建前生成并持久化的稳定键；重试使用同一键，不能用标题或展示编号替代。"
+        },
+        "status": {
+          "name": "状态",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "规划中"
+            },
+            {
+              "name": "进行中"
+            },
+            {
+              "name": "待验收"
+            },
+            {
+              "name": "待交付"
+            },
+            {
+              "name": "已交付"
+            },
+            {
+              "name": "暂停"
+            },
+            {
+              "name": "已取消"
+            }
+          ],
+          "description": "规划中：范围尚在整理；进行中：实际推进；待验收：必要验收未完成；待交付：必要环境交付未完成；已交付：约定范围、验收和交付均满足；暂停/已取消：保留决定和原范围。",
+          "default_value": [
+            "规划中"
+          ]
+        },
+        "scope": {
+          "name": "范围摘要",
+          "type": "text",
+          "description": "此批次包含范围和验收/交付目标，不能只用日期定义完成。"
+        },
+        "acceptance_summary": {
+          "name": "验收概况",
+          "type": "text",
+          "description": "适用范围的通过、未通过和未执行情况。 里程碑或汇报时聚合更新，不机械复制每条明细。"
+        },
+        "delivery_summary": {
+          "name": "实际交付",
+          "type": "text",
+          "description": "分别说明各目标环境的实际构建和交付结果。 里程碑或汇报时聚合更新，不机械复制每条明细。"
+        },
+        "project": {
+          "name": "所属项目",
+          "type": "link",
+          "target_role": "projects",
+          "bidirectional": false,
+          "description": "本版本唯一项目归属。单向关联；相关记录使用真实 record ID，另一端不会自动同步。"
+        },
+        "next_step": {
+          "name": "下一步",
+          "type": "text",
+          "description": "尚未满足的必要范围及承接动作。"
+        }
+      },
+      "quick_view": [
+        "number",
+        "title",
+        "project",
+        "status",
+        "scope",
+        "acceptance_summary",
+        "delivery_summary",
+        "next_step"
+      ],
+      "quick_filter": {
+        "logic": "and",
+        "conditions": []
+      },
+      "quick_group": [
+        "project"
+      ],
+      "action_views": [
+        {
+          "name": "待处理",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "status",
+                "intersects",
+                [
+                  "规划中",
+                  "进行中",
+                  "待验收",
+                  "待交付",
+                  "暂停"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "已结束",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "status",
+                "intersects",
+                [
+                  "已交付",
+                  "已取消"
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "documents": {
+    "requirements_and_bugs": {
+      "name": "需求与 Bug 说明",
+      "source": "requirements-and-bugs.xml",
+      "project_field": "requirements_doc"
+    },
+    "verification_and_delivery": {
+      "name": "测试与交付证据",
+      "source": "verification-and-delivery.xml",
+      "project_field": "evidence_doc"
+    }
+  },
+  "capabilities": {
+    "feedback_intake": [
+      "feedback.title",
+      "feedback.key",
+      "feedback.original",
+      "feedback.source_event_key",
+      "feedback.status",
+      "feedback.summary",
+      "feedback.project",
+      "feedback.project_input"
+    ],
+    "requirement_confirmation": [
+      "requirements.title",
+      "requirements.key",
+      "requirements.scope",
+      "requirements.criteria",
+      "requirements.revision",
+      "requirements.confirmed_revision",
+      "requirements.confirmation",
+      "requirements.status",
+      "requirements.project"
+    ],
+    "work_tracking": [
+      "work.key",
+      "work.status",
+      "work.scope",
+      "work.deliverable",
+      "work.verification_plan",
+      "work.dependencies",
+      "work.human_action",
+      "work.next_step",
+      "work.project",
+      "work.owner"
+    ],
+    "bug_reproduction": [
+      "bugs.key",
+      "bugs.expected",
+      "bugs.actual",
+      "bugs.conditions",
+      "bugs.baseline",
+      "bugs.status",
+      "bugs.reproduction_tests",
+      "verification.reproduced_bugs",
+      "verification.build",
+      "verification.result",
+      "verification.evidence"
+    ],
+    "bug_closure": [
+      "bugs.candidate_build",
+      "bugs.retest_tests",
+      "bugs.status",
+      "verification.retested_bugs",
+      "verification.build",
+      "verification.executor",
+      "verification.independence",
+      "verification.result",
+      "verification.executed_at",
+      "verification.evidence"
+    ],
+    "requirement_acceptance": [
+      "requirements.criteria",
+      "requirements.revision",
+      "requirements.confirmed_revision",
+      "requirements.verification",
+      "verification.requirements",
+      "verification.criteria_snapshot",
+      "verification.build",
+      "verification.result",
+      "verification.evidence"
+    ],
+    "verification_recording": [
+      "verification.key",
+      "verification.purpose",
+      "verification.method",
+      "verification.result",
+      "verification.criteria_snapshot",
+      "verification.environment",
+      "verification.build",
+      "verification.executor",
+      "verification.executed_at",
+      "verification.evidence",
+      "verification.project"
+    ],
+    "delivery_tracking": [
+      "delivery.key",
+      "delivery.kind",
+      "delivery.status",
+      "delivery.repository",
+      "delivery.build",
+      "delivery.environment",
+      "delivery.deployment_run",
+      "delivery.summary",
+      "delivery.evidence",
+      "delivery.project"
+    ],
+    "project_overview": [
+      "projects.key",
+      "projects.title",
+      "projects.status",
+      "projects.scope",
+      "projects.summary",
+      "projects.next_step",
+      "projects.requirements_doc",
+      "projects.evidence_doc"
+    ],
+    "version_overview": [
+      "versions.key",
+      "versions.title",
+      "versions.status",
+      "versions.scope",
+      "versions.acceptance_summary",
+      "versions.delivery_summary",
+      "versions.project",
+      "versions.next_step"
+    ],
+    "comment_intake": [
+      "feedback.source_event_key",
+      "feedback.original",
+      "feedback.author",
+      "feedback.source",
+      "feedback.project",
+      "feedback.status",
+      "feedback.summary"
+    ]
+  },
+  "feedback_form": {
+    "name": "提交反馈",
+    "table_role": "feedback",
+    "fields": [
+      "project_input",
+      "title",
+      "original",
+      "attachments",
+      "source"
+    ],
+    "required": [
+      "project_input",
+      "title",
+      "original"
+    ],
+    "project_assignment": "必选原始反馈项目；选项以真实06编号区分同名项目；受理时解析为真实所属项目ID。待确认项目保持未归属并推进核实，不能默认当前项目。"
+  },
+  "relationship_policy": "native_bidirectional_pairs",
+  "description": "一个 Base 管理多个项目的空母版；提供表结构、原生关系、表单、视图、来源去重字段与真实负责人字段。评论判断、接手与交接规则由 Skill 执行；不提供原子占用锁、自动审批或后台调度。",
+  "relation_pairs": [
+    [
+      "feedback.requirements",
+      "requirements.feedback"
+    ],
+    [
+      "feedback.bugs",
+      "bugs.feedback"
+    ],
+    [
+      "feedback.work",
+      "work.feedback"
+    ],
+    [
+      "requirements.work",
+      "work.requirements"
+    ],
+    [
+      "requirements.verification",
+      "verification.requirements"
+    ],
+    [
+      "bugs.work",
+      "work.bugs"
+    ],
+    [
+      "bugs.discovery_tests",
+      "verification.discovered_bugs"
+    ],
+    [
+      "bugs.reproduction_tests",
+      "verification.reproduced_bugs"
+    ],
+    [
+      "bugs.retest_tests",
+      "verification.retested_bugs"
+    ],
+    [
+      "delivery.verification",
+      "verification.delivery"
+    ]
+  ]
+}
