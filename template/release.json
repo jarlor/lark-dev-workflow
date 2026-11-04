@@ -15,7 +15,8 @@
       1,
       2
     ],
-    "binding_format_generated": 2
+    "binding_format_generated": 2,
+    "skill_version": "1.2.1"
   },
   "validation_status": "comments_and_light_collaboration_validated_with_single_user",
   "validated_on": "2026-10-26",
@@ -53,7 +54,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v1.2.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.0",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.1",
   "documentation_updated_on": "2026-11-04",
   "validation_history": {
     "1.1.0": {
@@ -72,5 +73,6 @@
       "independent_review": "targeted_probes_and_live_read_only_scan_plus_final_incremental_checks"
     }
   },
-  "comment_reader_sha256": "0525b50d1cc515a756972368d2ddd2ccb672b42190b8e7efcee262f4f4b3a991"
+  "comment_reader_sha256": "0525b50d1cc515a756972368d2ddd2ccb672b42190b8e7efcee262f4f4b3a991",
+  "release_version": "1.2.1"
 }

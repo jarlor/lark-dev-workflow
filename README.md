@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.0)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.1)**
 
-在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0` 和 Skill 发布 `v1.2.0`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`；当前配套 Skill 与完整包为 `v1.2.1`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -27,7 +27,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.0/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.1/skill/lark-dev-workflow --agent codex -g
 ```
 
 运行前准备：
@@ -36,7 +36,7 @@ npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.0/skill/lar
 - 本包两个辅助脚本需要 Python 3.9 或更高，仅使用标准库。
 - 安装并登录官方 [Lark CLI](https://github.com/larksuite/cli)，并提供 `lark-base`、`lark-doc`、`lark-drive` 及其共享认证技能 `lark-shared`。每位使用者通过自己的 user 身份完成登录与资源授权。本版本实际验证使用 Lark CLI 1.0.94、Python 3.9.6。
 
-`skills` 只安装 Skill 子目录。首次绑定还需下载 [v1.2.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.2.0/lark-dev-workflow-v1.2.0.zip)，解压后保留其中的 `template/`；将实际 `template/schema.json` 路径交给 Agent，作为 `onboard.py --contract` 的输入。仓库克隆也包含同一目录。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。首次绑定还需下载 [v1.2.1 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.2.1/lark-dev-workflow-v1.2.1.zip)，解压后保留其中的 `template/`；将实际 `template/schema.json` 路径交给 Agent，作为 `onboard.py --contract` 的输入。仓库克隆也包含同一目录。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 
@@ -72,9 +72,11 @@ npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.0/skill/lar
 
 本包模板规范为 `1.2.0`，绑定格式为 `2`；在线母版位置及发布信息见 `template/release.json`。旧格式 `1` 的项目配置继续可读，不要求迁移现有台账。
 
-GitHub Release 固定每次发布的 Skill、模板契约与完整包；在线模板提供可复制入口。版本以 `template/schema.json` 的 `template_version` 为准，标题仅用于展示。Skill 与模板可分别升级，使用时核对所选 Release 的兼容说明；“07 版本”记录的是自己的业务项目版本。
+GitHub Release 固定每次发布的 Skill、模板契约与完整包；在线模板提供可复制入口。Skill 版本见 `SKILL.md` 的 `metadata.version`；模板结构版本以 `template/schema.json` 的 `template_version` 为准，标题仅用于展示。Skill 与模板可分别升级，使用时核对所选 Release 的兼容说明；“07 版本”记录的是自己的业务项目版本。
 
-2026-11-04 将在线标题从 `v1.0` 对齐到 `v1.2.0`，并补齐飞书与 GitHub 的双向入口。本次为名称和说明修订，未改字段、状态或脚本。已发布的 `v1.2.0` 标签、ZIP 与校验值保持原样，包中的旧展示名称是发布时快照；本仓库 main 保留后续说明修订。
+2026-11-04 将在线标题从 `v1.0` 对齐到 `v1.2.0`，并补齐飞书与 GitHub 的双向入口。本次为名称和说明修订，未改字段、状态或脚本。已发布的 `v1.2.0` 标签、ZIP 与校验值保持原样，包中的旧展示名称是发布时快照；后续规则修复随新版本发布。
+
+`v1.2.1` 修复将内部核实误建为研发项的问题：受理、查日志、补证和对账回写原项，不单建 DEV；实际研发关联适用需求／Bug，明确授权的独立维护按项目约定处理。本次模板结构和绑定格式未变，已有 Base 无需迁移。
 
 升级先核对差异。Skill 不按新模板自动改造已有项目，不更改现有维护约定。刷新只更新可发现字段并保留人工扩展；资源身份、类型或维护责任冲突时，保留原配置并报告差异。
 

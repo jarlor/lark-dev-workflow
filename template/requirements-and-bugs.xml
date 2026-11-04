@@ -1,6 +1,6 @@
 <title>需求与 Bug 说明</title>
 <p>这是共享研发 Base 的需求与 Bug 详情容器，按项目分节。当前是空模板，尚未登记项目业务。状态和真实关联以表格记录为准。</p>
-<p>模板规范 v1.2.0，配套 lark-dev-workflow Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.0">v1.2.0 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
+<p>模板规范 v1.2.0，配套 lark-dev-workflow v1.2.1 Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.1">v1.2.1 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
 <h1 seq="auto">按项目定位</h1>
 <p>项目初始化时，先在“06 项目”取得真实 record ID 和自动编号，再在本文建立“真实项目编号 · 项目名称”章节，取得实际 block ID，将完整章节 URL 回填该项目行的“需求与Bug文档”。也可使用独立项目 Docx。</p>
 <p>Agent 从选定项目行解析文档 URL 与真实章节锚点，核实项目编号后，只在该项目节内读写。不要根据 Base 中的同名文档猜测归属，不要写到其他项目节。复制模板不能沿用原项目章节链接。</p>
