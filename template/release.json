@@ -51,7 +51,10 @@
     "two_real_accounts_concurrent_claim_and_handoff",
     "windows_live_runtime"
   ],
-  "source_display_name": "Agent研发工作流｜v1.0",
+  "source_display_name": "Agent研发工作流｜v1.2.0",
+  "repository_url": "https://github.com/jarlor/lark-dev-workflow",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.0",
+  "documentation_updated_on": "2026-11-04",
   "validation_history": {
     "1.1.0": {
       "independent_checks_passed": 15,

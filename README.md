@@ -2,6 +2,10 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.0)**
+
+在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0` 和 Skill 发布 `v1.2.0`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+
 | 交付物 | 位置 | 用途 |
 |---|---|---|
 | 通用 Skill | `skill/lark-dev-workflow/` | 理解反馈、确认修订、判断证据与流转、核对范围并回写 |
@@ -36,7 +40,7 @@ npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.0/skill/lar
 
 ## 开始使用
 
-1. 有访问权限时，打开[模板母版](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg)，复制为自己的研发工作区。也可让 Agent 按发布包的 `template/schema.json` 和两份 XML 在你有权限的空间创建空模板。一个副本可管理多个项目；母版保持无业务记录，仓库发布不会改变飞书资源权限。
+1. 打开[公开飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)，按页面提示登录并点击「使用该模板」，生成自己的研发工作区。也可让 Agent 按发布包的 `template/schema.json` 和两份 XML 在你有权限的空间创建空模板。一个副本可管理多个项目；业务数据写入自己的副本，母版保持为空。实际使用仍遵循飞书账号与租户策略。
 2. 按上面的安装方式安装 Skill，保留独立的 `template` 目录。飞书操作使用已有的 `lark-base`、`lark-doc` 和 `lark-drive` 工具能力；凭据不写入项目文件。
 3. 把副本链接交给 Codex，说明本次创建或接入哪个项目，以及已有维护约定。已有项目直接绑定 06 中的真实记录；新项目在已授权的接入范围内初始化。
 
@@ -67,6 +71,10 @@ npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.2.0/skill/lar
 ## 模板与升级
 
 本包模板规范为 `1.2.0`，绑定格式为 `2`；在线母版位置及发布信息见 `template/release.json`。旧格式 `1` 的项目配置继续可读，不要求迁移现有台账。
+
+GitHub Release 固定每次发布的 Skill、模板契约与完整包；在线模板提供可复制入口。版本以 `template/schema.json` 的 `template_version` 为准，标题仅用于展示。Skill 与模板可分别升级，使用时核对所选 Release 的兼容说明；“07 版本”记录的是自己的业务项目版本。
+
+2026-11-04 将在线标题从 `v1.0` 对齐到 `v1.2.0`，并补齐飞书与 GitHub 的双向入口。本次为名称和说明修订，未改字段、状态或脚本。已发布的 `v1.2.0` 标签、ZIP 与校验值保持原样，包中的旧展示名称是发布时快照；本仓库 main 保留后续说明修订。
 
 升级先核对差异。Skill 不按新模板自动改造已有项目，不更改现有维护约定。刷新只更新可发现字段并保留人工扩展；资源身份、类型或维护责任冲突时，保留原配置并报告差异。
 
