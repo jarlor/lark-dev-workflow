@@ -22,7 +22,7 @@
 
 优先使用用户或项目已提供的模板包与契约，不用公开模板覆盖项目已确认的结构。通过 `npx skills` 安装时，只会安装 Skill 子目录，仓库中的 `template/` 不会一同安装。
 
-本版 Skill 为 `1.2.1`，配套模板结构仍为 `1.2.0`。完整包位于 [v1.2.1 Release](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.1)：下载资产 [lark-dev-workflow-v1.2.1.zip](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.2.1/lark-dev-workflow-v1.2.1.zip)，解压后找到包内 `template/schema.json`。首次接入在已有授权范围内获取并保存该配套文件，再把实际路径传给 `onboard.py --contract`；不要把安装目录下不存在的 `template/` 当成默认路径。获取所选 Skill Release 附带的模板契约，并按 `template/schema.json` 记录模板结构版本；Skill 和模板结构的版本号可以不同；新版本不能静默替换已有项目的契约或映射。
+本版 Skill 为 `1.2.2`，配套模板结构仍为 `1.2.0`。完整包位于 [v1.2.2 Release](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.2)：下载资产 [lark-dev-workflow-v1.2.2.zip](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.2.2/lark-dev-workflow-v1.2.2.zip)，解压后找到包内 `template/schema.json`。首次接入在已有授权范围内获取并保存该配套文件，再把实际路径传给 `onboard.py --contract`；不要把安装目录下不存在的 `template/` 当成默认路径。获取所选 Skill Release 附带的模板契约，并按 `template/schema.json` 记录模板结构版本；Skill 和模板结构的版本号可以不同；新版本不能静默替换已有项目的契约或映射。
 
 ### 复制与核实
 
