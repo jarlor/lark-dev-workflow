@@ -119,9 +119,37 @@ def validate_result(result, run_id, snapshot_id):
     return result
 
 
-def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason):
+def project_governance(config, binding):
+    """Read explicit project rules locally; a configured but unreadable source is fatal."""
+    governance = binding.get('governance', {})
+    if not isinstance(governance, dict):
+        raise RunnerError('项目 governance 必须是对象。')
+    if 'rules_reference' not in governance:
+        return governance, None
+    reference = governance['rules_reference']
+    if not isinstance(reference, str) or not reference.strip() or '://' in reference:
+        raise RunnerError('governance.rules_reference 必须是可读取的本地文件路径。')
+    source = Path(reference)
+    if not source.is_absolute():
+        source = Path(config['workdir']) / source
+    try:
+        source = source.resolve(strict=True)
+        if not source.is_file():
+            raise OSError('引用不是普通文件')
+        content = source.read_text(encoding='utf-8')
+    except (OSError, ValueError, RuntimeError) as exc:
+        raise RunnerError(f'无法读取项目规则 governance.rules_reference={reference!r}（{source}）：{exc}') from exc
+    return governance, {'source': str(source), 'content': content}
+
+
+def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expected_binding=None):
     instructions = (HERE.parent / 'references/unattended-worker.md').read_text(encoding='utf-8')
+    binding = read_json(config['project_config'])
+    if expected_binding is not None and identity(config, binding) != identity(config, expected_binding):
+        raise RunnerError('本轮采集期间项目绑定已改变；请核对配置与快照，不会执行旧项目快照。')
+    governance, rules = project_governance(config, binding)
     context = {
+        'governance': governance, 'project_rules': rules,
         'run_id': run_id, 'snapshot_id': snapshot_id, 'reason': reason,
         'skill_file': str(HERE.parent / 'SKILL.md'), 'project_config': config['project_config'],
         'lark_profile': config['lark_profile'], 'snapshot_file': str(snapshot_file),
@@ -266,6 +294,7 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             paused.write_text('发现未收尾的运行。检查 runs 目录后使用 recover 重试。\n', encoding='utf-8')
             return {'status': 'recovery_required', 'run_id': state['inflight']['run_id']}
         try:
+            project_governance(config, binding)
             snapshot = collect_snapshot(config, binding, directory, collector)
             snapshot_id = digest(stable_snapshot(snapshot))
             timestamp = clock()
@@ -287,10 +316,11 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             run_dir = directory / 'runs' / run_id
             run_dir.mkdir(parents=True, mode=0o700)
             atomic_json(run_dir / 'snapshot.json', snapshot)
+            prompt = build_prompt(config, state, run_id, snapshot_id, run_dir / 'snapshot.json',
+                                  reason, binding)
             state['inflight'] = {'run_id': run_id, 'snapshot_id': snapshot_id,
                                  'started_at': now(), 'directory': str(run_dir), 'phase': 'starting'}
             save()
-            prompt = build_prompt(config, state, run_id, snapshot_id, run_dir / 'snapshot.json', reason)
             result, session_id = executor(config, state, run_dir, prompt, lock_fd, save)
             validate_result(result, run_id, snapshot_id)
             # Only the START snapshot is delivered. Changes made during execution remain visible.
@@ -379,9 +409,8 @@ def main(argv=None):
         elif args.command == 'check':
             config = control.load_config(args.config)
             binding = read_json(config['project_config'])
-            comments.resources(binding)
-            if binding.get('scope', {}).get('mode') != 'project_record':
-                raise RunnerError('首版仅支持绑定到一个真实项目记录的配置。')
+            project_governance(config, binding)
+            watch._binding(binding)
             output = {'status': 'local_config_valid', 'linux': sys.platform.startswith('linux'),
                       'remote_access_verified': False, 'cron_installed_verified': False}
         elif args.command in ['tick', 'scan']:

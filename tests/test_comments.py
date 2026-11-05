@@ -166,6 +166,65 @@ class PaginationTests(unittest.TestCase):
             m.acknowledgement(failed, {'event_key': 'unused'})
 
 
+class BaseOnlyTests(unittest.TestCase):
+    def test_base_only_scan_paginates_and_filters_by_live_project_relation(self):
+        for documents_present in (True, False):
+            with self.subTest(documents_present=documents_present):
+                c = config()
+                c['documents'] = {}
+                if not documents_present:
+                    c.pop('documents')
+                cli = FakeCli({'bitable': [], 'docx': []}, {
+                    'own': [reply('ownRoot', table='tblWork', record='recWorkA')],
+                    'foreign': [reply('foreignRoot', table='tblWork', record='recWorkB')]})
+                cli.overrides[('+list-comments', 'bitable', None, None)] = page(
+                    'bitable', 'BaseFixture', [comment('own', None)], True, 'outer2')
+                cli.overrides[('+list-comments', 'bitable', None, 'outer2')] = page(
+                    'bitable', 'BaseFixture', [comment('foreign', None)])
+                cli.overrides[('+list-replies', 'bitable', 'own', None)] = page(
+                    'bitable', 'BaseFixture', cli.replies['own'], True, 'reply2', 'own')
+                cli.overrides[('+list-replies', 'bitable', 'own', 'reply2')] = page(
+                    'bitable', 'BaseFixture', [reply('later', table='tblWork', record='recWorkA')],
+                    comment_id='own')
+                state, report = m.scan(c, m.empty_state(c), cli, include_resolved=True)
+                self.assertEqual(report['status'], 'complete')
+                self.assertEqual(report['scan']['resources'], [{'resource_type': 'bitable',
+                    'resource_token': 'BaseFixture', 'comments': 2, 'replies': 3,
+                    'pagination_complete': True}])
+                self.assertEqual({x['reply_id'] for x in m.pending(state)}, {'ownRoot', 'later'})
+                self.assertTrue(all(x['location']['status'] == 'in_scope' for x in m.pending(state)))
+                self.assertEqual({call[2] for call in cli.record_calls}, {'recWorkA', 'recWorkB'})
+                self.assertFalse(any(call[0] == 'docs' or '--need-relation' in call[2] for call in cli.calls))
+                repeated, repeated_report = m.scan(c, state, cli, include_resolved=True)
+                self.assertEqual(repeated_report['new_events'], 0)
+                self.assertEqual(repeated_report['new_revisions'], 0)
+                self.assertEqual(len(repeated['events']), 3)
+                cli.overrides[('+list-replies', 'bitable', 'own', 'reply2')] = m.CommentError('page denied')
+                failed, failure = m.scan(c, repeated, cli, include_resolved=True)
+                self.assertEqual(failure['status'], 'failed')
+                for key in ('events', 'acknowledgements', 'last_complete_scan', 'last_full_reconciliation'):
+                    self.assertEqual(failed[key], repeated[key])
+
+    def test_invalid_document_bindings_are_not_treated_as_base_only(self):
+        for documents in (None, [], 'invalid', {'details': None}, {'details': 'invalid'},
+                          {'details': {}}, {'details': {'token': ''}},
+                          {'details': {'token': '   '}}, {'details': {'token': 123}}):
+            with self.subTest(documents=documents):
+                c = config()
+                c['documents'] = documents
+                with self.assertRaises(m.CommentError):
+                    m.empty_state(c)
+
+    def test_repeated_docx_bindings_are_scanned_once(self):
+        c = config()
+        c['documents']['delivery'] = copy.deepcopy(c['documents']['requirements_and_bugs'])
+        cli = FakeCli()
+        state, report = m.scan(c, m.empty_state(c), cli, include_resolved=True)
+        self.assertEqual(report['status'], 'complete')
+        self.assertEqual(len(state['events']), 1)
+        self.assertEqual(sum(call[1] == '+list-comments' for call in cli.calls), 2)
+
+
 class LocationTests(unittest.TestCase):
     def test_shared_doc_same_name_uses_real_project_section(self):
         comments = {'bitable': [], 'docx': [comment('a', 'deepA'), comment('b', 'childB'), comment('unknown', None)]}

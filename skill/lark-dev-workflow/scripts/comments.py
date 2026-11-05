@@ -103,15 +103,16 @@ def resources(config):
     base = config['base']
     result = [{'type': 'bitable', 'token': base['token'], 'url': base.get('url')}]
     seen = {('bitable', base['token'])}
-    for purpose, doc in config.get('documents', {}).items():
-        if not nonempty(doc.get('token')):
+    documents = config.get('documents', {})
+    if not isinstance(documents, dict):
+        raise CommentError('Document bindings must be an object; omit them or use {} for Base-only projects.')
+    for purpose, doc in documents.items():
+        if not isinstance(doc, dict) or not nonempty(doc.get('token')):
             raise CommentError(f'Document binding {purpose} has no token.')
         identity = ('docx', doc['token'])
         if identity not in seen:
             result.append({'type': 'docx', 'token': doc['token'], 'url': doc.get('url')})
             seen.add(identity)
-    if len(result) < 2:
-        raise CommentError('Project binding has no document resources.')
     return result
 
 

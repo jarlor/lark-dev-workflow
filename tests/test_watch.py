@@ -254,6 +254,30 @@ class CollectionTests(unittest.TestCase):
                       lark_bin='/private/example node/lib/lark/cli.js')
         constructor.assert_called_once_with('fixture-profile', executable='/private/example node/lib/lark/cli.js')
 
+    def test_base_only_collect_returns_project_records_and_comments(self):
+        self.config['documents'] = {}
+        with mock.patch.object(self.cli, 'read', wraps=self.cli.read) as reader:
+            first, second = self.collect(), self.collect()
+        self.assertEqual(first, second)
+        self.assertEqual(len(first['records']), 9)
+        self.assertEqual(first['records']['tblWork/recWork']['fields']['fldProject'], [{'id': 'recA'}])
+        self.assertEqual(first['binding']['documents'], [])
+        self.assertEqual(len(first['comments']), 1)
+        observed = next(iter(first['comments'].values()))
+        self.assertEqual(observed['content']['text'], '请补充说明')
+        self.assertEqual(observed['location']['project_record_id'], 'recA')
+        self.assertEqual(first['notices'], {})
+        self.assertTrue(reader.call_args_list)
+        self.assertTrue(all('/base/BaseFixture' in call.args[call.args.index('--url') + 1]
+                            for call in reader.call_args_list))
+        journal = json.loads(self.state.read_text())
+        self.assertEqual(journal['last_complete_scan'], journal['last_full_reconciliation'])
+        before = self.state.read_bytes()
+        self.cli.config['tables']['work']['fields']['project']['target_table_id'] = 'tblOtherProjects'
+        with self.assertRaisesRegex(m.WatchError, 'project link'):
+            self.collect()
+        self.assertEqual(self.state.read_bytes(), before)
+
     def test_complete_stable_snapshot_and_narrow_feedback_intake(self):
         first, second = self.collect(), self.collect()
         self.assertEqual(first, second)
