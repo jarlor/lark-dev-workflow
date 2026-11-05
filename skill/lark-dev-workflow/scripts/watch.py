@@ -316,6 +316,15 @@ def _comment_snapshot(state):
 
 
 def collect(config, profile, *, comments_state_path, locations=None, lark_bin='lark-cli'):
+    try:
+        _binding(config)
+        reader = Cli(profile, executable=lark_bin)
+    except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
+        raise WatchError(f'Project snapshot failed ({type(exc).__name__}); keep the previous checkpoint.') from exc
+    return collect_with_reader(config, reader, comments_state_path=comments_state_path, locations=locations)
+
+
+def collect_with_reader(config, reader, *, comments_state_path, locations=None, reader_identity=None):
     """Return a stable snapshot, committing only complete comment observations.
 
     ``locations`` is the existing comments.py format-1 location-evidence object.
@@ -324,12 +333,19 @@ def collect(config, profile, *, comments_state_path, locations=None, lark_bin='l
     """
     try:
         scope, tables = _binding(config)
-        cli = Cli(profile, executable=lark_bin)
         known = comments.load_locations(locations)
         with comments.locked(comments_state_path):
             previous = comments.load_state(comments_state_path, config)
-            records = _read_records(config, cli, scope, tables)
-            updated, report = comments.scan(config, previous, cli, include_resolved=True, known=known)
+            if reader_identity is not None:
+                if not isinstance(reader_identity, dict) or not reader_identity:
+                    raise WatchError('Reader identity must be a nonempty object.')
+                if (Path(comments_state_path).exists()
+                        and previous.get('reader_identity') != reader_identity):
+                    raise WatchError('Existing comment observations belong to another reader identity; '
+                                     'preserve the journal and reconcile before switching accounts or backends.')
+                previous['reader_identity'] = copy.deepcopy(reader_identity)
+            records = _read_records(config, reader, scope, tables)
+            updated, report = comments.scan(config, previous, reader, include_resolved=True, known=known)
             if report['status'] != 'complete':
                 raise WatchError('Comment scan failed; previous observations were kept: ' + report['error'])
             observed, notices = _comment_snapshot(updated)

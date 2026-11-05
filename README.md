@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.2)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v1.4.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.4.0)**
 
-在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`；当前 Skill 与完整包为 `v1.3.2`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`。当前 Skill 与完整包为 **v1.4.0**。 打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -14,9 +14,20 @@
 
 模板提供结构和入口，Skill 负责业务判断。具体边界见 [模板与 Skill 职责](模板与Skill职责.md)。
 
+## v1.4.0 本人网页接入
+
+可选择两种本人访问方式：
+
+- **已有 CLI 用户 profile**：继续使用原 Lark CLI 登录和相应 `lark-*` 工具。
+- **不创建应用或 bot**：复用本人已经登录的飞书网页，不填写虚构 profile，也不借用其他项目的应用。需要 Node.js 22+ 和现有浏览器的本机连接；只操作自己的临时标签，不导出登录凭据。详见 [本人网页接入](skill/lark-dev-workflow/references/browser-access.md)。
+
+首版网页读取只支持已有格式 2、`project_record`、Base-only 的项目绑定，非空 Docx 绑定暂不支持。缺“反馈项目”时可明确选择 `linked_only`，只读取已关联事项；未归属的新反馈不在覆盖范围内。保留原绑定和模板，不自动加字段。
+
+`scan` 只读记录和评论，不写飞书、不启动 Codex 工作、不安装 cron。已在目标 Linux 完成真实本人网页只读扫描：两轮表格和评论一致、项目过滤通过。评论范围限当前账号网页可见的索引及已加载内容；真实长线程和已解决样本尚未实测。网页写入、回复和定时运行还需分别验证；本次未启用 cron。
+
 ## v1.3.2 更新
 
-旧反馈表没有“反馈项目”时，可在候选绑定中明确选择 `feedback_intake.mode=linked_only`，只扫描已关联本项目的事项与可核实归属的评论。运行结果会说明未归属的新反馈未被扫描；默认分流模式和项目隔离检查保留，不自动加字段或改绑定。本人 CLI 登录仍需在目标机器完成。详见 [旧表适配](skill/lark-dev-workflow/references/project-mapping.md#没有反馈项目的旧反馈表)。
+旧反馈表没有“反馈项目”时，可在候选绑定中明确选择 `feedback_intake.mode=linked_only`，只扫描已关联本项目的事项与可核实归属的评论。运行结果会说明未归属的新反馈未被扫描；默认分流模式和项目隔离检查保留，不自动加字段或改绑定。该版运行器使用 CLI，需在目标机器完成本人登录。详见 [旧表适配](skill/lark-dev-workflow/references/project-mapping.md#没有反馈项目的旧反馈表)。
 
 ## v1.3.1 更新
 
@@ -35,6 +46,8 @@ Linux 的配置、试跑、安装、暂停及移除方法见 [定时运行说明
 
 ## 安装
 
+以下命令固定安装 v1.4.0：
+
 安装到 Codex 的全局 Skill 目录：
 
 ```bash
@@ -46,7 +59,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.3.2/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.4.0/skill/lark-dev-workflow --agent codex -g
 ```
 
 Linux 已安装时，可重新执行上面的固定版本安装命令更新本 Skill。先保留项目配置和运行状态；手动安装或本地改过 Skill 的机器，先核对安装位置与差异，不覆盖个人修改。不要为了更新本技能运行会更新所有技能的命令。
@@ -57,14 +70,15 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 
 - `skills` 安装器需要 Node.js；当前官方要求 Node.js 22.20 或更高。
 - 辅助脚本需要 Python 3.9 或更高，仅使用标准库；可选的定时入口另需 Linux、Codex CLI 和系统 crontab。
-- 安装并登录官方 [Lark CLI](https://github.com/larksuite/cli)，并提供 `lark-base`、`lark-doc`、`lark-drive` 及其共享认证技能 `lark-shared`。每位使用者通过自己的 user 身份完成登录与资源授权。本版本实际验证使用 Lark CLI 1.0.94、Python 3.9.6。
+- 网页途径需要 Node.js 22+，复用本机已有、本人已登录的浏览器；配置步骤见 [网页接入说明](skill/lark-dev-workflow/references/browser-access.md)。不要求安装 Lark CLI，不因缺 profile 创建应用或 bot。
+- 已有可用 CLI 用户 profile 的机器可继续使用官方 [Lark CLI](https://github.com/larksuite/cli)，并提供相应的 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared` 技能；保持本人 user 身份。既有 CLI 验证使用 Lark CLI 1.0.94、Python 3.9.6，不代表新增网页途径已通过真实验证。
 
-`skills` 只安装 Skill 子目录。新建当前标准模板时可下载 [v1.3.2 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.3.2/lark-dev-workflow-v1.3.2.zip)，解压后保留其中的 `template/`；将实际 `template/schema.json` 路径交给 Agent，作为 `onboard.py --contract` 的输入。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v1.4.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.4.0/lark-dev-workflow-v1.4.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 
 1. 打开[公开飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)，按页面提示登录并点击「使用该模板」，生成自己的研发工作区。也可让 Agent 按发布包的 `template/schema.json` 和两份 XML 在你有权限的空间创建空模板。一个副本可管理多个项目；业务数据写入自己的副本，母版保持为空。实际使用仍遵循飞书账号与租户策略。
-2. 按上面的安装方式安装 Skill，保留独立的 `template` 目录。飞书操作使用已有的 `lark-base`、`lark-doc` 和 `lark-drive` 工具能力；凭据不写入项目文件。
+2. 按上面的安装方式安装已发布的 Skill，保留独立的 `template` 目录。选择已有 CLI 用户 profile 或本人网页；凭据留在原工具或浏览器中，不写入项目文件。首版网页 helper 只读已有 Base-only 项目，不能用它完成下方的新项目初始化。
 3. 把副本链接交给 Codex，说明本次创建或接入哪个项目，以及已有维护约定。已有项目直接绑定 06 中的真实记录；新项目在已授权的接入范围内初始化。
 
 可直接附上实际副本链接并使用：
@@ -85,7 +99,7 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 
 ## 只读绑定与实际验证
 
-`onboard.py` 只读发现资源，通过 `--contract` 接收独立模板的 `schema.json`，生成项目配置和检查报告；当前参数见 `--help`。它不创建项目、不改表或视图、不启用表单。初始化由 Agent 在用户已授权的范围内使用飞书工具完成，然后运行只读检查。
+CLI 途径的 `onboard.py` 只读发现资源，通过 `--contract` 接收独立模板的 `schema.json`，生成项目配置和检查报告；当前参数见 `--help`。它不借用浏览器登录、不创建项目、不改表或视图、不启用表单。网页途径按 [首次接入](skill/lark-dev-workflow/references/onboarding.md#发现绑定与检查) 核实真实结构和项目，另存候选映射。需要初始化时，Agent 仍按用户已授权的范围使用可用工具完成，再核对实际结果。
 
 报告的 `ready` 表示结构绑定检查通过，`validation_level=structure_binding`、`write_access_verified=false` 不证明真实写入或完整业务流程已通过。离线快照的检查结果只适用于该快照，远端写入前仍须核实相关当前结构。
 

@@ -52,10 +52,21 @@ def stable_snapshot(snapshot):
 
 
 def identity(config, binding):
-    return digest({'binding': comments.binding_identity(binding),
-                   'tables': binding.get('tables'), 'project_number': binding.get('project_number'),
-                   'workdir': config['workdir'], 'lark_profile': config['lark_profile'],
-                   'codex_profile': config.get('codex_profile')})
+    value = {'binding': comments.binding_identity(binding),
+             'tables': binding.get('tables'), 'project_number': binding.get('project_number'),
+             'workdir': config['workdir'], 'codex_profile': config.get('codex_profile')}
+    if config['format_version'] == 1:
+        # Keep existing CLI identities byte-for-byte compatible with saved state.
+        value['lark_profile'] = config['lark_profile']
+    else:
+        value['access'] = config['access']
+    return digest(value)
+
+
+def access_context(config):
+    if config['format_version'] == 1:
+        return {'mode': 'cli', 'lark_bin': config['lark_bin'], 'lark_profile': config['lark_profile']}
+    return dict(config['access'])
 
 
 @contextmanager
@@ -154,11 +165,13 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
         'governance': governance, 'project_rules': rules,
         'run_id': run_id, 'snapshot_id': snapshot_id, 'reason': reason,
         'skill_file': str(HERE.parent / 'SKILL.md'), 'project_config': config['project_config'],
-        'lark_profile': config['lark_profile'], 'snapshot_file': str(snapshot_file),
+        'access': access_context(config), 'snapshot_file': str(snapshot_file),
         'previous_result': state.get('last_result'),
         'recovery_note': state.get('recovery_note'),
         'previous_interrupted_run': (state.get('recoveries') or [{}])[-1].get('inflight'),
     }
+    if config['format_version'] == 1:
+        context['lark_profile'] = config['lark_profile']
     return instructions + '\n\n本轮本地配置与输入位置：\n' + json.dumps(context, ensure_ascii=False, indent=2)
 
 
@@ -259,6 +272,10 @@ def collect_snapshot(config, binding, directory, collector):
     old_path = os.environ.get('PATH')
     os.environ['PATH'] = config['path']
     try:
+        if config['format_version'] == 2:
+            from browser_watch import collect as browser_collect
+            return browser_collect(binding, config['access'],
+                                   comments_state_path=directory / 'browser-comments-state.json')
         return collector(binding, config['lark_profile'],
                          comments_state_path=directory / 'comments-state.json', lark_bin=config['lark_bin'])
     finally:
@@ -299,6 +316,10 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
         try:
             project_governance(config, binding)
             snapshot = collect_snapshot(config, binding, directory, collector)
+            current_config = control.load_config(config_path)
+            current_binding = read_json(current_config['project_config'])
+            if identity(current_config, current_binding) != identity(config, binding):
+                raise RunnerError('本轮采集期间登录方式、账号或运行绑定已改变；不会继续使用旧快照。')
             snapshot_id = digest(stable_snapshot(snapshot))
             timestamp = clock()
             state['last_scan_at'] = now()
@@ -396,7 +417,11 @@ def parser():
         if name == 'init':
             child.add_argument('--project-config', required=True, type=Path)
             child.add_argument('--workdir', required=True, type=Path)
-            child.add_argument('--lark-profile', required=True)
+            child.add_argument('--access', choices=('cli', 'browser'), default='cli')
+            child.add_argument('--lark-profile')
+            child.add_argument('--browser-cdp-url')
+            child.add_argument('--browser-user-id')
+            child.add_argument('--node-bin')
             child.add_argument('--codex-profile')
             child.add_argument('--interval-minutes', type=int, default=5)
     return result
@@ -408,13 +433,16 @@ def main(argv=None):
     try:
         if args.command == 'init':
             output = control.init_config(args.config, args.project_config, args.workdir,
-                                         args.lark_profile, args.interval_minutes, args.codex_profile)
+                                         args.lark_profile, args.interval_minutes, args.codex_profile,
+                                         access=args.access, browser_cdp_url=args.browser_cdp_url,
+                                         browser_user_id=args.browser_user_id, node_bin=args.node_bin)
         elif args.command == 'check':
             config = control.load_config(args.config)
             binding = read_json(config['project_config'])
             project_governance(config, binding)
             watch._binding(binding)
             output = {'status': 'local_config_valid', 'linux': sys.platform.startswith('linux'),
+                      'access': access_context(config),
                       'coverage': watch.scan_coverage(binding),
                       'remote_access_verified': False, 'cron_installed_verified': False}
         elif args.command in ['tick', 'scan']:

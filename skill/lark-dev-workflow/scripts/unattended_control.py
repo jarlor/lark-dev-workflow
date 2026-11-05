@@ -18,6 +18,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import urlsplit, urlunsplit
 
 
 class ControlError(ValueError):
@@ -30,6 +31,7 @@ CONFIG_FIELDS = frozenset({
     'interval_minutes', 'run_timeout_seconds', 'max_consecutive_runs',
     'reconcile_interval_seconds',
 })
+BROWSER_CONFIG_FIELDS = (CONFIG_FIELDS - {'lark_bin', 'lark_profile'}) | {'access'}
 
 
 def _text(value, name, *, optional=False):
@@ -74,15 +76,45 @@ def _inside(path, directory):
     return path == directory or directory in path.parents
 
 
-def _validate(value, config_path):
-    if not isinstance(value, dict) or set(value) != CONFIG_FIELDS:
-        missing = sorted(CONFIG_FIELDS - set(value)) if isinstance(value, dict) else sorted(CONFIG_FIELDS)
-        unknown = sorted(set(value) - CONFIG_FIELDS) if isinstance(value, dict) else []
-        raise ControlError(f'Configuration fields differ: missing={missing}, unknown={unknown}.')
-    if type(value['format_version']) is not int or value['format_version'] != 1:
-        raise ControlError('Only runner configuration format_version=1 is supported.')
+def _browser_access(value):
+    if (not isinstance(value, dict)
+            or set(value) != {'mode', 'node_bin', 'cdp_url', 'user_id'}
+            or value.get('mode') != 'browser'):
+        raise ControlError('Browser access requires exactly mode, node_bin, cdp_url and user_id.')
     result = dict(value)
-    for name in ('project_config', 'workdir', 'state_dir', 'python_bin', 'codex_bin', 'lark_bin'):
+    result['node_bin'] = str(_absolute(value['node_bin'], 'access.node_bin'))
+    result['user_id'] = _text(value['user_id'], 'access.user_id')
+    url = _text(value['cdp_url'], 'access.cdp_url')
+    try:
+        parts = urlsplit(url)
+        local = parts.hostname in ('127.0.0.1', '::1')
+        port = parts.port
+    except ValueError as exc:
+        raise ControlError('access.cdp_url must use HTTP and a numeric loopback address with a port.') from exc
+    if (parts.scheme != 'http' or not local or not port or parts.username is not None
+            or parts.password is not None or parts.path not in ('', '/')
+            or parts.query or parts.fragment):
+        raise ControlError('access.cdp_url must use HTTP and a numeric loopback address with a port.')
+    result['cdp_url'] = urlunsplit((parts.scheme, parts.netloc, '', '', ''))
+    return result
+
+
+def _validate(value, config_path):
+    version = value.get('format_version') if isinstance(value, dict) else None
+    if type(version) is not int or version not in (1, 2):
+        raise ControlError('Runner configuration format_version must be 1 (CLI) or 2 (browser).')
+    expected = CONFIG_FIELDS if version == 1 else BROWSER_CONFIG_FIELDS
+    if set(value) != expected:
+        missing = sorted(expected - set(value))
+        unknown = sorted(set(value) - expected)
+        raise ControlError(f'Configuration fields differ: missing={missing}, unknown={unknown}.')
+    result = dict(value)
+    path_fields = ('project_config', 'workdir', 'state_dir', 'python_bin', 'codex_bin')
+    if version == 1:
+        path_fields += ('lark_bin',)
+    else:
+        result['access'] = _browser_access(value['access'])
+    for name in path_fields:
         if not isinstance(value[name], str):
             raise ControlError(f'{name} must be an absolute path string.')
         result[name] = str(_absolute(value[name], name))
@@ -99,13 +131,19 @@ def _validate(value, config_path):
         raise ControlError('state_dir exists and is not a directory.')
     if _inside(workdir, state) or _inside(project, state) or _inside(config_path, state):
         raise ControlError('state_dir must not contain workdir or either configuration file.')
-    for name in ('python_bin', 'codex_bin', 'lark_bin'):
-        executable = Path(result[name])
+    executables = {name: result[name] for name in ('python_bin', 'codex_bin')}
+    if version == 1:
+        executables['lark_bin'] = result['lark_bin']
+    else:
+        executables['access.node_bin'] = result['access']['node_bin']
+    for name, binary in executables.items():
+        executable = Path(binary)
         if not executable.is_file() or not os.access(executable, os.X_OK):
             raise ControlError(f'{name} must name an executable file.')
         if executable in (project, config_path) or _inside(executable, state):
             raise ControlError(f'{name} conflicts with configuration or private state paths.')
-    result['lark_profile'] = _text(value['lark_profile'], 'lark_profile')
+    if version == 1:
+        result['lark_profile'] = _text(value['lark_profile'], 'lark_profile')
     result['codex_profile'] = _text(value['codex_profile'], 'codex_profile', optional=True)
     result['interval_minutes'] = _interval(value['interval_minutes'])
     for name in ('run_timeout_seconds', 'max_consecutive_runs', 'reconcile_interval_seconds'):
@@ -147,8 +185,9 @@ def _new_json(path, value):
         Path(temporary).unlink(missing_ok=True)
 
 
-def init_config(path, project_config, workdir, lark_profile, interval_minutes=5,
-                codex_profile=None, *, which=shutil.which):
+def init_config(path, project_config, workdir, lark_profile=None, interval_minutes=5,
+                codex_profile=None, *, access='cli', browser_cdp_url=None,
+                browser_user_id=None, node_bin=None, which=shutil.which):
     """Create a new private configuration without touching the project binding."""
     # Reject a dangling link too: resolving first could otherwise create its target.
     try:
@@ -159,9 +198,17 @@ def init_config(path, project_config, workdir, lark_profile, interval_minutes=5,
     config_path = _absolute(path, 'config_path', base=Path.cwd())
     if config_path.exists() or config_path.is_symlink():
         raise ControlError('Runner configuration already exists; it was not overwritten.')
+    if access not in ('cli', 'browser'):
+        raise ControlError('access must be cli or browser.')
+    if access == 'browser' and lark_profile is not None:
+        raise ControlError('Browser access uses the logged-in browser user, not a lark_profile.')
+    if access == 'cli' and any(v is not None for v in (browser_cdp_url, browser_user_id, node_bin)):
+        raise ControlError('Browser options require --access browser.')
     binaries = {}
-    for name, command in (('python_bin', 'python3'), ('codex_bin', 'codex'), ('lark_bin', 'lark-cli')):
-        found = which(command)
+    commands = [('python_bin', 'python3'), ('codex_bin', 'codex')]
+    commands += [('lark_bin', 'lark-cli')] if access == 'cli' else [('node_bin', 'node')]
+    for name, command in commands:
+        found = node_bin if name == 'node_bin' and node_bin is not None else which(command)
         if not found:
             raise ControlError(f'{command} was not found on PATH.')
         binaries[name] = str(_absolute(found, name, base=Path.cwd()))
@@ -171,20 +218,27 @@ def init_config(path, project_config, workdir, lark_profile, interval_minutes=5,
             directories.append(str(_absolute(entry, 'PATH entry')))
     directories.extend(['/usr/local/bin', '/usr/bin', '/bin'])
     fixed_path = os.pathsep.join(dict.fromkeys(directories))
+    access_value = None
+    if access == 'browser':
+        access_value = {'mode': 'browser', 'node_bin': binaries.pop('node_bin'),
+                        'cdp_url': browser_cdp_url, 'user_id': browser_user_id}
     value = {
-        'format_version': 1,
+        'format_version': 1 if access == 'cli' else 2,
         'project_config': str(_absolute(project_config, 'project_config', base=Path.cwd())),
         'workdir': str(_absolute(workdir, 'workdir', base=Path.cwd())),
         'state_dir': str(config_path.parent / (config_path.stem + '-state')),
         **binaries,
         'path': fixed_path,
-        'lark_profile': lark_profile,
         'codex_profile': codex_profile,
         'interval_minutes': interval_minutes,
         'run_timeout_seconds': 1800,
         'max_consecutive_runs': 12,
         'reconcile_interval_seconds': 86400,
     }
+    if access == 'cli':
+        value['lark_profile'] = lark_profile
+    else:
+        value['access'] = access_value
     value = _validate(value, config_path)
     _private_directory(Path(value['state_dir']))
     _new_json(config_path, value)

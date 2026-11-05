@@ -423,6 +423,55 @@ class CollectionTests(unittest.TestCase):
                       lark_bin='/private/example node/lib/lark/cli.js')
         constructor.assert_called_once_with('fixture-profile', executable='/private/example node/lib/lark/cli.js')
 
+    def test_injected_reader_reuses_complete_collection_without_constructing_cli(self):
+        expected = self.collect()
+        with mock.patch.object(m, 'Cli', side_effect=AssertionError('CLI must not be constructed')):
+            actual = m.collect_with_reader(self.config, self.cli, comments_state_path=self.state)
+        self.assertEqual(actual, expected)
+        self.assertEqual(len(actual['comments']), 1)
+        self.assertEqual(len(actual['records']), 9)
+        self.assertEqual(json.loads(self.state.read_text())['acknowledgements'], {})
+
+    def test_reader_identity_is_committed_with_complete_observations_and_preserved(self):
+        reader_id = {'mode': 'browser', 'user_id': 'fixture-user', 'cdp_url': 'http://127.0.0.1:9222'}
+        first = m.collect_with_reader(self.config, self.cli, comments_state_path=self.state,
+                                      reader_identity=reader_id)
+        journal = json.loads(self.state.read_text())
+        self.assertEqual(journal['reader_identity'], reader_id)
+        journal['acknowledgements'] = {'existing-event': [{'revision': 'existing'}]}
+        self.state.write_text(json.dumps(journal))
+        second = m.collect_with_reader(self.config, self.cli, comments_state_path=self.state,
+                                       reader_identity=reader_id)
+        self.assertEqual(first, second)
+        self.assertEqual(json.loads(self.state.read_text())['acknowledgements'], journal['acknowledgements'])
+
+    def test_reader_identity_change_or_legacy_journal_is_rejected_without_reads(self):
+        reader_id = {'mode': 'browser', 'user_id': 'fixture-user', 'cdp_url': 'http://127.0.0.1:9222'}
+        self.collect()
+        legacy = self.state.read_bytes()
+        with mock.patch.object(self.cli, 'fields', side_effect=AssertionError('No reads after identity mismatch')):
+            with self.assertRaisesRegex(m.WatchError, 'reader identity'):
+                m.collect_with_reader(self.config, self.cli, comments_state_path=self.state,
+                                      reader_identity=reader_id)
+        self.assertEqual(self.state.read_bytes(), legacy)
+        self.state.unlink()
+        m.collect_with_reader(self.config, self.cli, comments_state_path=self.state, reader_identity=reader_id)
+        before = self.state.read_bytes()
+        for changed in ({**reader_id, 'user_id': 'other-user'},
+                        {**reader_id, 'cdp_url': 'http://127.0.0.1:9333'}):
+            with self.subTest(changed=changed):
+                with self.assertRaisesRegex(m.WatchError, 'reader identity'):
+                    m.collect_with_reader(self.config, self.cli, comments_state_path=self.state,
+                                          reader_identity=changed)
+                self.assertEqual(self.state.read_bytes(), before)
+
+    def test_failed_first_reader_scan_never_saves_identity_or_partial_observations(self):
+        self.cli.fail_comments = True
+        with self.assertRaisesRegex(m.WatchError, 'Comment scan failed'):
+            m.collect_with_reader(self.config, self.cli, comments_state_path=self.state,
+                                  reader_identity={'mode': 'browser', 'user_id': 'fixture'})
+        self.assertFalse(self.state.exists())
+
     def test_base_only_collect_returns_project_records_and_comments(self):
         self.config['documents'] = {}
         with mock.patch.object(self.cli, 'read', wraps=self.cli.read) as reader:

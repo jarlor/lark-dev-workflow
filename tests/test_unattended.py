@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
 from unittest import mock
 import uuid
 
@@ -323,6 +324,144 @@ class SchedulingTests(RuntimeFixture):
             self.snapshot['records']['tblWork/recItem']['fields']['fldTitle'] = str(revision)
             self.assertEqual(self.tick()['status'], 'ran')
         self.assertEqual(self.state()['idle_wakes'], 0)
+
+
+class BrowserRuntimeTests(RuntimeFixture):
+    def setUp(self):
+        super().setUp()
+        self.cli_config = copy.deepcopy(self.config)
+        self.config['format_version'] = 2
+        self.config.pop('lark_bin')
+        self.config.pop('lark_profile')
+        self.config['access'] = {'mode': 'browser', 'node_bin': str(Path(sys.executable).resolve()),
+                                 'cdp_url': 'http://127.0.0.1:9222', 'user_id': 'web-user-fixture'}
+        self.binding['documents'] = {}
+        write_json(self.project_path, self.binding)
+        self.save_config()
+        self.browser_reader = mock.Mock(side_effect=self.read_browser)
+        self.addCleanup(mock.patch.stopall)
+        mock.patch.dict(sys.modules, {'browser_watch': SimpleNamespace(collect=self.browser_reader)}).start()
+        self.cli_reader = mock.Mock(side_effect=AssertionError('Browser mode must not invoke Lark CLI.'))
+
+    def read_browser(self, binding, access, *, comments_state_path):
+        self.assertEqual(binding, self.binding)
+        self.assertEqual(access, self.config['access'])
+        self.assertEqual(comments_state_path, Path(self.config['state_dir']) / 'browser-comments-state.json')
+        return copy.deepcopy(self.snapshot)
+
+    def run_tick(self):
+        return m.tick(self.config_path, collector=self.cli_reader, executor=self.execute,
+                      clock=lambda: self.timestamp)
+
+    def test_browser_scan_routes_without_cli_or_checkpoint_and_restores_path(self):
+        before_path = os.environ.get('PATH')
+        directory = Path(self.config['state_dir'])
+        directory.mkdir()
+        legacy_journal = directory / 'comments-state.json'
+        legacy_journal.write_text('{"legacy_cli_observations":"preserved"}')
+        before_journal = legacy_journal.read_bytes()
+        result = m.scan_only(self.config_path, collector=self.cli_reader)
+        self.assertEqual(result['status'], 'scanned')
+        self.assertFalse(result['codex_started'])
+        self.assertFalse(result['checkpoint_advanced'])
+        self.assertEqual(os.environ.get('PATH'), before_path)
+        self.assertEqual(legacy_journal.read_bytes(), before_journal)
+        self.browser_reader.assert_called_once()
+        self.cli_reader.assert_not_called()
+        self.assertFalse((Path(self.config['state_dir']) / 'state.json').exists())
+
+    def test_browser_worker_receives_real_access_and_no_fake_lark_profile(self):
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        context = json.loads(self.calls[-1]['prompt'].split('本轮本地配置与输入位置：\n', 1)[1])
+        self.assertEqual(context['access'], self.config['access'])
+        self.assertNotIn('lark_profile', context)
+        self.assertNotIn('lark_bin', context['access'])
+        self.assertEqual(self.state()['checkpoint'], m.digest(m.stable_snapshot(self.snapshot)))
+        self.cli_reader.assert_not_called()
+
+    def test_browser_login_failure_preserves_prior_checkpoint_and_session(self):
+        self.run_tick()
+        before = self.state()
+        self.browser_reader.side_effect = m.OnboardingError('Browser login expired.')
+        result = self.run_tick()
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['checkpoint_advanced'])
+        self.assertEqual(self.state()['checkpoint'], before['checkpoint'])
+        self.assertEqual(self.state()['session_id'], before['session_id'])
+        self.assertEqual(len(self.calls), 1)
+
+    def test_browser_account_or_endpoint_change_cannot_reuse_prior_state(self):
+        self.run_tick()
+        state_file = Path(self.config['state_dir']) / 'state.json'
+        before = state_file.read_bytes()
+        original = copy.deepcopy(self.config['access'])
+        for key, value in (('user_id', 'another-user'), ('cdp_url', 'http://127.0.0.1:9333')):
+            self.config['access'] = {**original, key: value}
+            self.save_config()
+            with self.subTest(key=key), self.assertRaises(m.RunnerError):
+                self.run_tick()
+            self.assertEqual(state_file.read_bytes(), before)
+        self.assertEqual(self.browser_reader.call_count, 1)
+
+    def test_switching_back_to_cli_preserves_browser_state_and_requires_reconciliation(self):
+        self.run_tick()
+        state_file = Path(self.config['state_dir']) / 'state.json'
+        before = state_file.read_bytes()
+        write_json(self.config_path, self.cli_config)
+        with self.assertRaises(m.RunnerError):
+            self.run_tick()
+        self.assertEqual(state_file.read_bytes(), before)
+        self.cli_reader.assert_not_called()
+
+    def test_browser_identity_change_during_scan_never_starts_worker(self):
+        def changed(*args, **kwargs):
+            snapshot = self.read_browser(*args, **kwargs)
+            replacement = copy.deepcopy(self.config)
+            replacement['access']['user_id'] = 'another-user'
+            write_json(self.config_path, replacement)
+            return snapshot
+
+        self.browser_reader.side_effect = changed
+        result = self.run_tick()
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['checkpoint_advanced'])
+        self.assertIsNone(self.state()['checkpoint'])
+        self.assertNotIn('inflight', self.state())
+        self.assertFalse(self.calls)
+
+    def test_browser_check_is_local_only_and_pause_does_not_open_browser(self):
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = m.main(['check', '--config', str(self.config_path)])
+        result = json.loads(output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(result['access'], self.config['access'])
+        self.assertFalse(result['remote_access_verified'])
+        self.assertFalse(result['cron_installed_verified'])
+        m.control_state(self.config_path, 'pause')
+        self.assertEqual(self.run_tick()['status'], 'paused')
+        self.browser_reader.assert_not_called()
+
+    def test_legacy_cli_identity_hash_is_unchanged(self):
+        legacy = {'binding': m.comments.binding_identity(self.binding),
+                  'tables': self.binding.get('tables'), 'project_number': self.binding.get('project_number'),
+                  'workdir': self.cli_config['workdir'], 'lark_profile': self.cli_config['lark_profile'],
+                  'codex_profile': self.cli_config.get('codex_profile')}
+        self.assertEqual(m.identity(self.cli_config, self.binding), m.digest(legacy))
+
+    def test_init_parser_requires_no_lark_profile_for_explicit_browser_mode(self):
+        argv = ['init', '--config', str(self.config_path), '--project-config', str(self.project_path),
+                '--workdir', str(self.work), '--access', 'browser',
+                '--browser-cdp-url', 'http://127.0.0.1:9222', '--browser-user-id', 'web-user-fixture',
+                '--node-bin', sys.executable]
+        args = m.parser().parse_args(argv)
+        self.assertEqual(args.access, 'browser')
+        self.assertIsNone(args.lark_profile)
+        with mock.patch.object(m.control, 'init_config', return_value={'prepared': True}) as initialize:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(m.main(argv), 0)
+        self.assertEqual(initialize.call_args.kwargs['browser_user_id'], 'web-user-fixture')
+        self.assertEqual(initialize.call_args.kwargs['access'], 'browser')
 
 
 class GovernancePromptTests(RuntimeFixture):

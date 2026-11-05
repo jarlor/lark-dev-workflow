@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "1.3.2",
+    "skill_version": "1.4.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -27,7 +27,25 @@
       "feedback_intake_modes": [
         "project_input",
         "linked_only"
-      ]
+      ],
+      "runner_config_formats": [
+        1,
+        2
+      ],
+      "access_modes": [
+        "cli_user_profile",
+        "personal_browser"
+      ],
+      "browser": {
+        "runner_config_format": 2,
+        "requires_node_major_at_least": 22,
+        "requires_existing_local_browser": true,
+        "requires_new_application": false,
+        "supports_docx": false,
+        "comment_scope": "native_sdk_visible_model",
+        "consistency": "two_complete_passes_equal",
+        "scan_timeout_seconds": 300
+      }
     }
   },
   "validation_status": "comments_and_light_collaboration_validated_with_single_user",
@@ -54,7 +72,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 166,
+  "automated_tests_passed": 222,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -66,7 +84,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v1.2.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.2",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.4.0",
   "documentation_updated_on": "2026-11-05",
   "validation_history": {
     "1.1.0": {
@@ -123,28 +141,57 @@
       ],
       "target_linux_installed": false,
       "tested_source_commit": "738977233e01cf3fc9c533a8a4a0c7a4f9dc46f8"
+    },
+    "1.3.2": {
+      "version": "1.3.2",
+      "date": "2026-11-05",
+      "tests": 166,
+      "environments": [
+        "Python 3.9.6 local",
+        "Python 3.13.18 isolated Linux container"
+      ],
+      "scope": [
+        "explicit_linked_feedback_scan_without_form_intake_fields",
+        "coverage_report_and_no_silent_fallback",
+        "record_and_comment_project_isolation",
+        "document_project_number_required_and_verified",
+        "intake_mode_change_before_execution_rejection",
+        "failure_preserves_observations_and_checkpoint"
+      ],
+      "not_validated": [
+        "real_target_linux_user_login_scan_write_and_cron_end_to_end",
+        "unassigned_feedback_intake_without_verified_project_input"
+      ],
+      "target_linux_installed": false
     }
   },
   "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "1.3.2",
+  "release_version": "1.4.0",
   "skill_release_validation": {
-    "version": "1.3.2",
+    "version": "1.4.0",
     "date": "2026-11-05",
-    "tests": 166,
+    "tests": 222,
     "environments": [
-      "Python 3.9.6 local",
-      "Python 3.13.18 isolated Linux container"
+      "Python 3.9.6 and Node.js local",
+      "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
     ],
     "scope": [
-      "explicit_linked_feedback_scan_without_form_intake_fields",
-      "coverage_report_and_no_silent_fallback",
+      "browser_config_without_cli_profile_or_application_creation",
+      "existing_browser_owned_tab_lifecycle_protocol",
+      "native_sdk_visible_comment_model_not_server_history",
       "record_and_comment_project_isolation",
-      "document_project_number_required_and_verified",
-      "intake_mode_change_before_execution_rejection",
-      "failure_preserves_observations_and_checkpoint"
+      "two_complete_passes_equal_before_observation_commit",
+      "pending_model_consumption_and_identity_change_rejection",
+      "failure_preserves_observations_and_checkpoint",
+      "real_target_linux_native_readonly_scan",
+      "unordered_record_and_json_key_canonical_comparison",
+      "four_independent_browser_workflow_behavior_cases"
     ],
     "not_validated": [
-      "real_target_linux_user_login_scan_write_and_cron_end_to_end",
+      "real_long_comment_threads_and_resolved_thread_samples",
+      "large_base_performance",
+      "real_login_expiry_and_permission_change",
+      "browser_write_and_cron_end_to_end",
       "unassigned_feedback_intake_without_verified_project_input"
     ],
     "target_linux_installed": false

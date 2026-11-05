@@ -200,6 +200,112 @@ class ConfigTests(Fixture):
         self.assertIn(str(node_bin), value['path'].split(os.pathsep))
 
 
+class BrowserConfigTests(Fixture):
+    def browser_config(self, *, destination=None, **kwargs):
+        node = self.binary_dir / 'node'
+        node.write_text('#!/bin/sh\nexit 99\n')
+        node.chmod(0o700)
+        found = {**self.binaries, 'node': str(node)}
+        lookups = []
+
+        def which(name):
+            lookups.append(name)
+            if name == 'lark-cli':
+                raise AssertionError('Browser mode must not require Lark CLI.')
+            return found.get(name)
+
+        path = destination or self.workdir / 'browser runner.json'
+        config = m.init_config(path, self.binding, self.workdir, access='browser',
+                               browser_cdp_url='http://127.0.0.1:9222/',
+                               browser_user_id='browser-user-fixture', which=which, **kwargs)
+        return path, config, lookups
+
+    def test_browser_init_needs_no_lark_cli_or_profile_and_preserves_original_binding(self):
+        before = self.binding.read_bytes()
+        path, config, lookups = self.browser_config()
+        self.assertEqual(config['format_version'], 2)
+        self.assertNotIn('lark_bin', config)
+        self.assertNotIn('lark_profile', config)
+        self.assertEqual(config['access']['cdp_url'], 'http://127.0.0.1:9222')
+        self.assertEqual(config['access']['user_id'], 'browser-user-fixture')
+        self.assertEqual(set(lookups), {'python3', 'codex', 'node'})
+        self.assertEqual(m.load_config(path), config)
+        self.assertEqual(self.binding.read_bytes(), before)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertIn(str(self.binary_dir), config['path'].split(os.pathsep))
+        self.assertIn('tick --config', m.cron_preview(path))
+
+    def test_browser_init_can_pin_node_without_discovering_another_node(self):
+        pinned = self.binary_dir / 'node-pinned'
+        pinned.write_text('#!/bin/sh\nexit 99\n')
+        pinned.chmod(0o700)
+        _, config, lookups = self.browser_config(node_bin=str(pinned))
+        self.assertEqual(config['access']['node_bin'], str(pinned))
+        self.assertNotIn('node', lookups)
+
+    def test_browser_access_rejects_remote_credentialed_or_ambiguous_cdp_urls(self):
+        path, config, _ = self.browser_config()
+        for url in ('https://127.0.0.1:9222', 'ws://127.0.0.1:9222', 'http://localhost:9222',
+                    'http://192.168.1.1:9222', 'http://0.0.0.0:9222', 'http://127.0.0.2:9222', 'http://127.0.0.1',
+                    'http://127.0.0.1:0', 'http://127.0.0.1:65536',
+                    'http://user@127.0.0.1:9222', 'http://127.0.0.1:9222/json',
+                    'http://127.0.0.1:9222?token=fixture', 'http://127.0.0.1:9222#fragment',
+                    'http://127.0.0.1:9222\n', 42):
+            with self.subTest(url=url):
+                candidate = copy.deepcopy(config)
+                candidate['access']['cdp_url'] = url
+                path.write_text(json.dumps(candidate))
+                with self.assertRaises(m.ControlError):
+                    m.load_config(path)
+        config['access']['cdp_url'] = 'http://[::1]:9222'
+        path.write_text(json.dumps(config))
+        self.assertEqual(m.load_config(path)['access']['cdp_url'], 'http://[::1]:9222')
+
+    def test_browser_access_requires_exact_shape_real_executable_and_user(self):
+        path, config, _ = self.browser_config()
+        changes = [None, {}, {'mode': 'cli'}, {'user_id': ''}, {'user_id': 'user\nother'},
+                   {'node_bin': 'relative/node'}, {'node_bin': str(self.binding)},
+                   {'node_bin': str(self.root / 'missing-node')}, {'cookie': 'must-not-be-stored'}]
+        for change in changes:
+            with self.subTest(change=change):
+                candidate = copy.deepcopy(config)
+                if change is None or not change:
+                    candidate['access'] = change
+                else:
+                    candidate['access'].update(change)
+                path.write_text(json.dumps(candidate))
+                with self.assertRaises(m.ControlError):
+                    m.load_config(path)
+        for field in ('lark_bin', 'lark_profile'):
+            candidate = copy.deepcopy(config)
+            candidate[field] = self.config[field]
+            path.write_text(json.dumps(candidate))
+            with self.assertRaises(m.ControlError):
+                m.load_config(path)
+
+    def test_missing_browser_options_or_node_never_creates_configuration(self):
+        for options in ({}, {'browser_cdp_url': 'http://127.0.0.1:9222'},
+                        {'browser_user_id': 'fixture'}, {'lark_profile': 'wrong-profile'}):
+            path = self.workdir / 'incomplete-browser.json'
+            with self.subTest(options=options), self.assertRaises(m.ControlError):
+                m.init_config(path, self.binding, self.workdir, access='browser',
+                              which=lambda name: self.binaries.get(name, self.binaries['python3']),
+                              **options)
+            self.assertFalse(path.exists())
+        with self.assertRaises(m.ControlError):
+            m.init_config(self.workdir / 'missing-node.json', self.binding, self.workdir,
+                          access='browser', browser_cdp_url='http://127.0.0.1:9222',
+                          browser_user_id='fixture', which=self.binaries.get)
+
+    def test_cli_mode_rejects_browser_flags_and_keeps_format_one(self):
+        for options in ({'browser_cdp_url': 'http://127.0.0.1:9222'},
+                        {'browser_user_id': 'fixture'}, {'node_bin': self.binaries['python3']}):
+            with self.subTest(options=options), self.assertRaises(m.ControlError):
+                m.init_config(self.workdir / 'wrong-mode.json', self.binding, self.workdir,
+                              'fixture', which=self.binaries.get, **options)
+        self.assertEqual(m.load_config(self.config_path), self.config)
+
+
 class CronTests(Fixture):
     def test_preview_quotes_spaces_sets_only_command_path_and_does_not_execute(self):
         line = m.cron_preview(self.config_path)

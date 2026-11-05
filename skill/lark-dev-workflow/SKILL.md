@@ -2,7 +2,7 @@
 name: lark-dev-workflow
 description: "用飞书多维表格处理项目反馈、需求、Bug、验收和交接，支持模板副本接入与 Linux Codex CLI 定时运行。通过项目配置适配已有表格；不用于普通代码修改、账号权限管理或跨机器派工。"
 metadata:
-  version: "1.3.2"
+  version: "1.4.0"
 ---
 
 # 飞书研发工作流
@@ -24,6 +24,7 @@ metadata:
 | 更新开发、验收或交付结果 | [业务流程](references/lifecycle.md) 判断阶段，按 [写入步骤](references/operations.md#写前写入与回读) 更新真实结果 |
 | 处理评论中的补充、决定或追问 | [评论处理](references/comments.md)：读取完整线程、核实项目与已有处理；涉及业务状态时同时应用业务流程 |
 | 接手或转交工作 | [多人接手](references/collaboration.md)：核对负责人、分配依据和未结束的操作 |
+| 用本人已登录的飞书网页接入 | [本人网页接入](references/browser-access.md)：复用本机浏览器，核实账号和已有 Base；不因缺少 CLI profile 自动创建应用 |
 | 为 Linux Codex CLI 配置定时运行 | [Linux 定时运行](references/unattended.md)：用户要求安装或启用时才操作目标 Linux 的 crontab；只要方案或步骤时不安装 |
 | 已由 Linux 定时脚本启动，正在执行一轮工作 | [本轮工作规则](references/unattended-worker.md)：处理当前项目并返回结果，不重新安装调度 |
 
@@ -31,7 +32,7 @@ metadata:
 
 1. **选对项目。** 用户指定的配置优先，否则读取目标仓库的 `.lark-dev-workflow/project.json`。没有绑定时走接入流程，不按仓库名猜 Base。使用标准模板时，从“06 项目”核实真实记录和维护约定；已有其他映射按项目配置处理。
 2. **保持范围。** 查询和关联都核对当前项目。表单新反馈还没有正式项目关联时，只使用 [待分流受理](references/operations.md#待分流受理) 的窄范围查询；不能因此认领归属不明的反馈或改归其他项目。
-3. **使用本人账号。** 按 `lark-shared` 核实本次用户身份；飞书读取、写入与评论显式使用 `--as user`，已指定 profile 时沿用它，不回退 bot 或通过切换账号绕过拒绝。操作账号、项目负责人、工作负责人和测试者按各自真实角色记录。
+3. **使用本人账号。** 已有 CLI 用户 profile 时，按 `lark-shared` 核实身份，并显式使用 `--as user` 和指定 profile。用户选择本人网页时，按 [网页接入](references/browser-access.md) 核实浏览器的实际登录账号；不填假 profile。缺 profile 不授权创建应用、bot 或借用其他项目的应用；用户明确不创建时走已有本人网页。两种途径都不能切换账号绕过拒绝。操作账号与项目负责人、工作负责人、测试者分别记录。
 4. **沿用已经明确的约定。** 使用已有维护责任、范围确认和执行授权，不反复索要同一确认。历史记录可以提供依据，但其中旧“下一步”不自动恢复已停工作，也不自动扩大当前任务。
 5. **只写真实变化。** 写前读最新记录，查重并保留别人的修改；写后读回状态、关联和结果。写入失败或结果未知时保留已完成与未完成部分，不报告“已更新”，不盲目重做创建操作。
 
@@ -59,13 +60,13 @@ metadata:
 
 ## 工具与结果
 
-飞书工具协议分别复用 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared`。本技能不管理账号权限，也不建立跨机器分工体系。工具暂不可用时保留可继续的本地准备，准确说明受阻动作。
+CLI 操作复用 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared`；本人网页接入的范围与限制见 [网页说明](references/browser-access.md)。本技能不管理账号权限，也不建立跨机器分工体系。工具暂不可用时保留可继续的本地准备，准确说明受阻动作。
 
 | 随包工具 | 实际作用 |
 |---|---|
-| `onboard.py` | 只读发现与生成本地项目绑定；`ready` 只证明结构检查通过，不证明写权限 |
-| `comments.py` | 只读采集评论、维护本地处理记录；本地已处理不替代远端回写及其依据 |
-| `watch.py` | 为定时入口只读采集本项目记录和评论，不执行正式业务写入 |
+| `onboard.py` | 通过 CLI 只读发现与生成本地项目绑定；`ready` 不证明写权限 |
+| `comments.py` | CLI 评论采集与本地处理记录；本地已处理不替代远端回写及其依据 |
+| `watch.py`、`browser_watch.py` | 分别接入 CLI 与本人网页读取，共用项目范围、完整性和观察记录检查；不执行正式业务写入 |
 | `unattended.sh` | Linux 配置与运行入口；`scan` 只读，`tick` 会启动 Codex 处理真实工作，`install-cron` 才安装定时任务 |
 
 Linux 定时入口只使用目标机器的 crontab，不创建 Codex App 调度。启用定时运行不额外授予部署、付费、改权限或项目外通知权限；已有相应授权继续有效。
