@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
@@ -161,9 +161,18 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
             or watch.feedback_intake_mode(binding) != watch.feedback_intake_mode(expected_binding)):
         raise RunnerError('本轮采集期间项目绑定已改变；请核对配置与快照，不会执行旧项目快照。')
     governance, rules = project_governance(config, binding)
+    prepared_at = datetime.now(timezone.utc)
+    # Prompt preparation precedes process startup: this is a conservative finish target,
+    # not a claim about the child's exact start time. Recalculate it for every invocation.
+    run_budget = {
+        'timeout_seconds': config['run_timeout_seconds'],
+        'prepared_at': prepared_at.isoformat(),
+        'finish_before': (prepared_at + timedelta(seconds=config['run_timeout_seconds'])).isoformat(),
+    }
     context = {
         'governance': governance, 'project_rules': rules,
         'run_id': run_id, 'snapshot_id': snapshot_id, 'reason': reason,
+        'run_budget': run_budget,
         'skill_file': str(HERE.parent / 'SKILL.md'), 'project_config': config['project_config'],
         'access': access_context(config), 'snapshot_file': str(snapshot_file),
         'previous_result': state.get('last_result'),

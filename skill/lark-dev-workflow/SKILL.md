@@ -2,7 +2,7 @@
 name: lark-dev-workflow
 description: "用飞书多维表格处理项目反馈、需求、Bug、验收和交接，支持模板副本接入与 Linux Codex CLI 定时运行。通过项目配置适配已有表格；不用于普通代码修改、账号权限管理或跨机器派工。"
 metadata:
-  version: "1.4.0"
+  version: "1.4.1"
 ---
 
 # 飞书研发工作流

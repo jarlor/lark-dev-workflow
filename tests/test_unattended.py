@@ -1,6 +1,7 @@
 """Offline behavior checks for cron-driven work; never invoke real Feishu or Codex."""
 import contextlib
 import copy
+from datetime import datetime, timedelta, timezone
 import io
 import json
 import os
@@ -482,6 +483,64 @@ class GovernancePromptTests(RuntimeFixture):
     def context(self):
         prompt = self.calls[-1]['prompt']
         return json.loads(prompt.split('本轮本地配置与输入位置：\n', 1)[1])
+
+    def test_prompt_budget_uses_actual_timeout_and_utc_preparation_time(self):
+        prepared_at = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        for timeout in (30, 1800, 3600):
+            with self.subTest(timeout=timeout):
+                self.config['run_timeout_seconds'] = timeout
+                with mock.patch.object(m, 'datetime', wraps=datetime) as clock:
+                    clock.now.return_value = prepared_at
+                    prompt = m.build_prompt(self.config, {}, 'run', 'snapshot',
+                                            self.root / 'snapshot.json', 'initial')
+                context = json.loads(prompt.split('本轮本地配置与输入位置：\n', 1)[1])
+                budget = context['run_budget']
+                self.assertEqual(budget['timeout_seconds'], timeout)
+                self.assertEqual(datetime.fromisoformat(budget['prepared_at']), prepared_at)
+                self.assertEqual(datetime.fromisoformat(budget['finish_before']),
+                                 prepared_at + timedelta(seconds=timeout))
+
+    def test_continuation_gets_fresh_budget_without_changing_session(self):
+        self.outcome = 'continue'
+        first = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        with mock.patch.object(m, 'datetime', wraps=datetime) as clock:
+            clock.now.return_value = first
+            self.assertEqual(self.run_tick()['status'], 'ran')
+            old_budget = self.context()['run_budget']
+            self.timestamp += self.config['interval_minutes'] * 60
+            clock.now.return_value = first + timedelta(minutes=5)
+            self.config['run_timeout_seconds'] = 120
+            self.save_config()
+            self.assertEqual(self.run_tick()['status'], 'ran')
+        budget = self.context()['run_budget']
+        self.assertEqual(self.context()['reason'], 'continuation')
+        self.assertEqual(self.calls[-1]['state']['session_id'], self.session)
+        self.assertEqual(budget['timeout_seconds'], 120)
+        self.assertEqual(datetime.fromisoformat(budget['prepared_at']), first + timedelta(minutes=5))
+        self.assertEqual(datetime.fromisoformat(budget['finish_before']),
+                         first + timedelta(minutes=7))
+        self.assertNotEqual(budget, old_budget)
+
+    def test_recovery_renews_budget_and_preserves_unknown_prior_effects(self):
+        def interrupted(*args):
+            self.execute(*args)
+            raise m.RunnerError('interrupted fixture')
+        first = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+        with mock.patch.object(m, 'datetime', wraps=datetime) as clock:
+            clock.now.return_value = first
+            self.assertEqual(self.run_tick(executor=interrupted)['status'], 'failed')
+            old_budget = self.context()['run_budget']
+            interrupted_run = self.state()['inflight']
+            self.assertIsNone(self.state()['checkpoint'])
+            m.control_state(self.config_path, 'recover')
+            clock.now.return_value = first + timedelta(hours=2)
+            self.assertEqual(self.run_tick()['status'], 'ran')
+        context = self.context()
+        self.assertNotEqual(context['run_budget'], old_budget)
+        self.assertEqual(datetime.fromisoformat(context['run_budget']['finish_before']),
+                         first + timedelta(hours=2, seconds=self.config['run_timeout_seconds']))
+        self.assertEqual(context['previous_interrupted_run'], interrupted_run)
+        self.assertIsNotNone(context['recovery_note'])
 
     def test_first_and_resumed_prompts_include_current_rules_and_governance(self):
         self.assertEqual(self.run_tick()['status'], 'ran')

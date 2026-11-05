@@ -24,6 +24,8 @@
 
 本轮只推进当前可完成的工作，不启动后台监听、长时间轮询、嵌套 cron 或 Codex App 调度，不修改本运行器的状态或配置。需要更长时间的工作拆成可核对的进度，保留后续动作；业务状态按实际结果回写并读回。
 
+`run_budget.timeout_seconds` 是本轮实际配置的执行时限。`prepared_at` 是本轮指令准备时刻，早于进程实际启动；`finish_before` 据此计算，作为提前收尾的参考，两者均为 UTC 时间。每轮及恢复后使用这次的新时间，不沿用上轮截止时间。开始耗时步骤或一笔写入前读取当前时间，判断剩余时间是否够完成操作、读回并保存结果；不够就不开始这一步。为读回、记录已完成和剩余工作、返回最终 JSON 留出时间，按 `finish_before` 及时分批结束；还有可继续工作时返回 `continue`。不要为了赶时间省略核对、把未完成写成完成，或自行延长时限；硬超时保护仍然有效。
+
 最终仅返回运行器要求的 JSON：原样返回 `run_id`、`snapshot_id`，填写 `outcome`、`summary`、`next_step`、`retry_after_seconds`。`summary` 与 `next_step` 用短而具体的中文。这个结果用于安排下一轮，不证明业务验收完成。
 
 | outcome | 何时使用 | retry_after_seconds |
