@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.1)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.2)**
 
-在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`；当前 Skill 与完整包为 `v1.3.1`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`；当前 Skill 与完整包为 `v1.3.2`。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -13,6 +13,10 @@
 | 项目配置 | 目标项目的 `.lark-dev-workflow/project.json` | 绑定共享 Base 中本项目的真实记录、字段、文档章节和维护约定 |
 
 模板提供结构和入口，Skill 负责业务判断。具体边界见 [模板与 Skill 职责](模板与Skill职责.md)。
+
+## v1.3.2 更新
+
+旧反馈表没有“反馈项目”时，可在候选绑定中明确选择 `feedback_intake.mode=linked_only`，只扫描已关联本项目的事项与可核实归属的评论。运行结果会说明未归属的新反馈未被扫描；默认分流模式和项目隔离检查保留，不自动加字段或改绑定。本人 CLI 登录仍需在目标机器完成。详见 [旧表适配](skill/lark-dev-workflow/references/project-mapping.md#没有反馈项目的旧反馈表)。
 
 ## v1.3.1 更新
 
@@ -42,7 +46,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.3.1/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.3.2/skill/lark-dev-workflow --agent codex -g
 ```
 
 Linux 已安装时，可重新执行上面的固定版本安装命令更新本 Skill。先保留项目配置和运行状态；手动安装或本地改过 Skill 的机器，先核对安装位置与差异，不覆盖个人修改。不要为了更新本技能运行会更新所有技能的命令。
@@ -55,7 +59,7 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 - 辅助脚本需要 Python 3.9 或更高，仅使用标准库；可选的定时入口另需 Linux、Codex CLI 和系统 crontab。
 - 安装并登录官方 [Lark CLI](https://github.com/larksuite/cli)，并提供 `lark-base`、`lark-doc`、`lark-drive` 及其共享认证技能 `lark-shared`。每位使用者通过自己的 user 身份完成登录与资源授权。本版本实际验证使用 Lark CLI 1.0.94、Python 3.9.6。
 
-`skills` 只安装 Skill 子目录。新建当前标准模板时可下载 [v1.3.1 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.3.1/lark-dev-workflow-v1.3.1.zip)，解压后保留其中的 `template/`；将实际 `template/schema.json` 路径交给 Agent，作为 `onboard.py --contract` 的输入。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。新建当前标准模板时可下载 [v1.3.2 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.3.2/lark-dev-workflow-v1.3.2.zip)，解压后保留其中的 `template/`；将实际 `template/schema.json` 路径交给 Agent，作为 `onboard.py --contract` 的输入。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 

@@ -15,7 +15,9 @@
 
 首先用各 CLI 的状态／帮助命令核对登录及版本。Codex 需支持 `exec`、按会话 ID `exec resume`、`--json`、`--output-schema` 和 `--output-last-message`。脚本协议按 Codex CLI 0.159.2 和 Lark CLI 1.0.94 的接口编写；不依赖实时事件订阅。项目实际可读写范围仍需在目标 Linux 机器核实。
 
-自动扫描需要 `scope.project_table_id`、顶层 `project_number`、各表的 `id` 与真实 `fields` 映射。非项目表的 `project` 关联必须指向同一项目表；反馈表还需 `project_input` 和 `status`。补齐映射时先只读核实字段 ID、类型和关联目标，另存候选配置并比较原项目身份，不机械改键或编造字段。
+旧反馈表没有“反馈项目”字段时，先按 [旧表适配](project-mapping.md#没有反馈项目的旧反馈表) 检查已有字段。可明确选择只扫描已关联事项；这不包括未归属的新反馈，不能当作完整反馈入口已接通。缺少本人 profile 则需在运行 cron 的 Linux 用户下，按 `lark-shared` 完成本人登录；本地映射或离线测试都不能代替登录。
+
+自动扫描需要真实项目记录、`scope.project_table_id`、各表的 `id` 与实际 `fields` 映射。非项目表的 `project` 关联必须指向同一项目表。默认 `project_input` 模式接收未归属反馈，还需要顶层 `project_number`、项目表的 `number`，以及反馈表的 `project_input` 和 `status`；`linked_only` 不要求这些分流字段。但配置中已声明的项目编号仍须与实际记录一致；已绑定 Docx 时也必须保留并核对编号，以免漏掉本项目章节的评论。补齐映射时先只读核实字段 ID、类型和关联目标，另存候选配置并比较原项目身份，不机械改键或编造字段。
 
 无人值守的新会话不继承当前聊天。把已经确认的沟通、授权和暂停约束写入本机项目规则，并在项目绑定的 `governance.rules_reference` 中引用。该字段用于无人值守时是本地文件路径：相对路径以 `workdir` 为基准，也接受绝对路径；运行器每轮载入实际内容，引用不可读就停止该轮。原有项目规则继续适用，不把某个项目的禁止评论约定写成所有项目的默认规则。
 

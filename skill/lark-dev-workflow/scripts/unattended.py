@@ -145,7 +145,9 @@ def project_governance(config, binding):
 def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expected_binding=None):
     instructions = (HERE.parent / 'references/unattended-worker.md').read_text(encoding='utf-8')
     binding = read_json(config['project_config'])
-    if expected_binding is not None and identity(config, binding) != identity(config, expected_binding):
+    if expected_binding is not None and (
+            identity(config, binding) != identity(config, expected_binding)
+            or watch.feedback_intake_mode(binding) != watch.feedback_intake_mode(expected_binding)):
         raise RunnerError('本轮采集期间项目绑定已改变；请核对配置与快照，不会执行旧项目快照。')
     governance, rules = project_governance(config, binding)
     context = {
@@ -276,6 +278,7 @@ def scan_only(config_path, *, collector=watch.collect):
         atomic_json(directory / 'last-scan.json', snapshot)
         return {'status': 'scanned', 'records': len(snapshot.get('records', {})),
                 'comments': len(snapshot.get('comments', {})), 'notices': len(snapshot.get('notices', {})),
+                'coverage': snapshot.get('coverage', {}),
                 'codex_started': False, 'checkpoint_advanced': False}
 
 
@@ -412,6 +415,7 @@ def main(argv=None):
             project_governance(config, binding)
             watch._binding(binding)
             output = {'status': 'local_config_valid', 'linux': sys.platform.startswith('linux'),
+                      'coverage': watch.scan_coverage(binding),
                       'remote_access_verified': False, 'cron_installed_verified': False}
         elif args.command in ['tick', 'scan']:
             if not sys.platform.startswith('linux'):

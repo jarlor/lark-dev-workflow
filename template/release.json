@@ -16,14 +16,18 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "1.3.1",
+    "skill_version": "1.3.2",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
       "requires_scope_mode": "project_record",
       "requires_template_migration": false,
       "platform": "linux",
-      "requires_docx": false
+      "requires_docx": false,
+      "feedback_intake_modes": [
+        "project_input",
+        "linked_only"
+      ]
     }
   },
   "validation_status": "comments_and_light_collaboration_validated_with_single_user",
@@ -50,7 +54,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 149,
+  "automated_tests_passed": 166,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -62,7 +66,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v1.2.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.1",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.2",
   "documentation_updated_on": "2026-11-05",
   "validation_history": {
     "1.1.0": {
@@ -97,30 +101,52 @@
         "real_linux_login_to_feishu_write_and_cron_end_to_end",
         "real_feedback_confirmation_comment_round_trip"
       ]
+    },
+    "1.3.1": {
+      "version": "1.3.1",
+      "date": "2026-11-05",
+      "tests": 149,
+      "environments": [
+        "Python 3.9.6 local",
+        "Python 3.10.12 isolated directory on target Linux"
+      ],
+      "scope": [
+        "base_only_records_comments_pagination_project_filtering",
+        "invalid_document_binding_rejection",
+        "fresh_and_resumed_worker_project_rules",
+        "binding_change_before_execution_rejection_independently_retested",
+        "fresh_codex_cli_read_only_no_outbound_behavior"
+      ],
+      "not_validated": [
+        "real_linux_login_to_feishu_write_and_cron_end_to_end",
+        "real_feedback_confirmation_comment_round_trip"
+      ],
+      "target_linux_installed": false,
+      "tested_source_commit": "738977233e01cf3fc9c533a8a4a0c7a4f9dc46f8"
     }
   },
   "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "1.3.1",
+  "release_version": "1.3.2",
   "skill_release_validation": {
-    "version": "1.3.1",
+    "version": "1.3.2",
     "date": "2026-11-05",
-    "tests": 149,
+    "tests": 166,
     "environments": [
       "Python 3.9.6 local",
-      "Python 3.10.12 isolated directory on target Linux"
+      "Python 3.13.18 isolated Linux container"
     ],
     "scope": [
-      "base_only_records_comments_pagination_project_filtering",
-      "invalid_document_binding_rejection",
-      "fresh_and_resumed_worker_project_rules",
-      "binding_change_before_execution_rejection_independently_retested",
-      "fresh_codex_cli_read_only_no_outbound_behavior"
+      "explicit_linked_feedback_scan_without_form_intake_fields",
+      "coverage_report_and_no_silent_fallback",
+      "record_and_comment_project_isolation",
+      "document_project_number_required_and_verified",
+      "intake_mode_change_before_execution_rejection",
+      "failure_preserves_observations_and_checkpoint"
     ],
     "not_validated": [
-      "real_linux_login_to_feishu_write_and_cron_end_to_end",
-      "real_feedback_confirmation_comment_round_trip"
+      "real_target_linux_user_login_scan_write_and_cron_end_to_end",
+      "unassigned_feedback_intake_without_verified_project_input"
     ],
-    "target_linux_installed": false,
-    "tested_source_commit": "738977233e01cf3fc9c533a8a4a0c7a4f9dc46f8"
+    "target_linux_installed": false
   }
 }

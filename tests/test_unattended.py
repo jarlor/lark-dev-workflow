@@ -89,6 +89,21 @@ class RuntimeFixture(unittest.TestCase):
 
 
 class SchedulingTests(RuntimeFixture):
+    def test_scan_reports_limited_coverage_without_advancing_checkpoint(self):
+        self.snapshot['coverage'] = {'feedback': {
+            'mode': 'linked_only', 'unassigned_feedback': 'excluded',
+            'message': '只读已关联反馈，未归属反馈未扫描。'}}
+        result = m.scan_only(self.config_path, collector=self.collect)
+        self.assertEqual(result['status'], 'scanned')
+        self.assertEqual(result['coverage'], self.snapshot['coverage'])
+        self.assertFalse(result['codex_started'])
+        self.assertFalse(result['checkpoint_advanced'])
+        state_dir = Path(self.config['state_dir'])
+        saved = json.loads((state_dir / 'last-scan.json').read_text())
+        self.assertEqual(saved['coverage'], result['coverage'])
+        self.assertFalse((state_dir / 'state.json').exists())
+        self.assertEqual(self.calls, [])
+
     def test_scan_saves_private_snapshot_without_consuming_first_or_later_work(self):
         result = m.scan_only(self.config_path, collector=self.collect)
         self.assertEqual(result['status'], 'scanned')
@@ -413,6 +428,35 @@ class GovernancePromptTests(RuntimeFixture):
     def test_later_collection_rebinding_preserves_checkpoint(self):
         self.assert_rebinding_during_collection_is_rejected(previous_run=True)
 
+    def assert_intake_change_during_collection_is_rejected(self, *, previous_run):
+        if previous_run:
+            self.assertEqual(self.run_tick()['status'], 'ran')
+            checkpoint = self.state()['checkpoint']
+        else:
+            checkpoint = None
+        previous_calls = len(self.calls)
+        self.snapshot['comments']['new'] = {'revision': 'pending'}
+
+        def change_intake_while_collecting(*args, **kwargs):
+            snapshot = self.collect(*args, **kwargs)
+            changed = copy.deepcopy(self.binding)
+            changed['feedback_intake'] = {'mode': 'linked_only'}
+            write_json(self.project_path, changed)
+            return snapshot
+
+        result = self.run_tick(collector=change_intake_while_collecting)
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['checkpoint_advanced'])
+        self.assertEqual(len(self.calls), previous_calls)
+        self.assertEqual(self.state()['checkpoint'], checkpoint)
+        self.assertNotIn('inflight', self.state())
+
+    def test_initial_collection_intake_change_does_not_execute_old_coverage(self):
+        self.assert_intake_change_during_collection_is_rejected(previous_run=False)
+
+    def test_later_collection_intake_change_preserves_checkpoint(self):
+        self.assert_intake_change_during_collection_is_rejected(previous_run=True)
+
     def test_invalid_or_non_file_reference_fails_closed(self):
         for reference in ['', None, 42, str(self.work), 'https://example.com/rules']:
             with self.subTest(reference=reference):
@@ -473,6 +517,22 @@ class GovernancePromptTests(RuntimeFixture):
             self.rules.unlink()
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 1)
+        self.assertEqual(self.calls, [])
+
+    def test_check_reports_linked_only_coverage_without_reading_feishu(self):
+        self.binding['feedback_intake'] = {'mode': 'linked_only'}
+        self.binding['tables']['feedback'] = {'id': 'tblFeedback', 'fields': {
+            'project': {'id': 'fldProject', 'type': 'link', 'target_table_id': 'tblProjects'}}}
+        write_json(self.project_path, self.binding)
+        output = io.StringIO()
+        with mock.patch.object(m, 'collect_snapshot', side_effect=AssertionError('local check only')):
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 0)
+        result = json.loads(output.getvalue())
+        self.assertEqual(result['coverage']['feedback']['mode'], 'linked_only')
+        self.assertEqual(result['coverage']['feedback']['unassigned_feedback'], 'excluded')
+        self.assertTrue(result['coverage']['feedback']['message'])
+        self.assertFalse((Path(self.config['state_dir']) / 'state.json').exists())
         self.assertEqual(self.calls, [])
 
 

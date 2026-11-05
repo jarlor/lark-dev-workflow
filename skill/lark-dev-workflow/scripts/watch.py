@@ -142,9 +142,31 @@ class Cli(comments.Cli):
         raise WatchError('+record-list: exceeded 1000 pages; scan is incomplete.')
 
 
+def feedback_intake_mode(config):
+    setting = config.get('feedback_intake', {'mode': 'project_input'})
+    if (not isinstance(setting, dict)
+            or setting.get('mode') not in ('project_input', 'linked_only')):
+        raise WatchError('feedback_intake.mode must be project_input or linked_only.')
+    return setting['mode']
+
+
+def scan_coverage(config):
+    if 'feedback' not in config.get('tables', {}):
+        return {'feedback': {'mode': 'not_configured', 'unassigned_feedback': 'excluded',
+                             'message': '未配置反馈表，本轮不扫描反馈记录。'}}
+    mode = feedback_intake_mode(config)
+    return {'feedback': {
+        'mode': mode,
+        'unassigned_feedback': 'excluded' if mode == 'linked_only' else 'matching_project_input_only',
+        'message': ('仅扫描已关联本项目的反馈及可核实归属的评论；未归属的新反馈未扫描。'
+                    if mode == 'linked_only' else
+                    '扫描已关联反馈，以及项目编号匹配且待受理或待补充的未归属反馈。')}}
+
+
 def _binding(config):
     if not isinstance(config, dict) or config.get('format_version') != 2:
         raise WatchError('A format-2 project binding is required.')
+    feedback_intake_mode(config)
     scope = config.get('scope', {})
     if scope.get('mode') != 'project_record':
         raise WatchError('Unattended reads currently require scope.mode=project_record.')
@@ -159,6 +181,8 @@ def _binding(config):
             or len(set(table_ids)) != len(table_ids)):
         raise WatchError('Mapped table IDs are missing or duplicated.')
     comments.resources(config)
+    if config.get('documents') and not comments.nonempty(config.get('project_number')):
+        raise WatchError('已绑定 Docx，仍需真实 project_number 核对项目章节；不能跳过文档评论。')
     return scope, tables
 
 
@@ -209,6 +233,7 @@ def _feedback_options(field, number):
 def _read_records(config, cli, scope, tables):
     snapshot = {}
     token, project_id = config['base']['token'], scope['project_record_id']
+    intake_mode = feedback_intake_mode(config)
     # Verify the immutable project number before allowing the unassigned intake.
     roles = ['projects', *sorted(role for role in tables if role != 'projects')]
     for role in roles:
@@ -218,7 +243,10 @@ def _read_records(config, cli, scope, tables):
         if role == 'projects':
             rows = [cli.read_record(token, table['id'], project_id, fields)]
             number = table['fields'].get('number')
-            if 'feedback' in tables and (not number or rows[0]['values'].get(number['id']) != config.get('project_number')):
+            needs_number = (('feedback' in tables and intake_mode == 'project_input')
+                            or config.get('project_number') is not None or bool(config.get('documents')))
+            if (needs_number and
+                    (not number or rows[0]['values'].get(number['id']) != config.get('project_number'))):
                 raise WatchError('The live project number does not match this binding; feedback intake was not read.')
         else:
             project_field = table['fields']['project']['id']
@@ -226,10 +254,12 @@ def _read_records(config, cli, scope, tables):
                 'logic': 'and', 'conditions': [[project_field, 'intersects', [{'id': project_id}]]]})
             if any(not _one_project(row['values'], project_field, project_id) for row in rows):
                 raise WatchError(f'{role}: a returned record is outside this project or has ambiguous ownership.')
-        if role == 'feedback':
+        if role == 'feedback' and intake_mode == 'project_input':
             original, status = table['fields'].get('project_input'), table['fields'].get('status')
             if not original or not status or status.get('type') != 'select':
-                raise WatchError('Feedback intake needs mapped project_input and status fields.')
+                raise WatchError('Feedback intake needs mapped project_input and status fields. '
+                                 '若只需扫描已关联项目的反馈，可明确配置 feedback_intake.mode=linked_only；'
+                                 '该模式不会接收未归属的新反馈。')
             eligible = _feedback_options(current[original['id']], config.get('project_number'))
             if eligible:
                 intake = cli.records(token, table['id'], fields, {'logic': 'and', 'conditions': [
@@ -304,7 +334,8 @@ def collect(config, profile, *, comments_state_path, locations=None, lark_bin='l
                 raise WatchError('Comment scan failed; previous observations were kept: ' + report['error'])
             observed, notices = _comment_snapshot(updated)
             snapshot = {'format_version': 1, 'binding': comments.binding_identity(config),
-                        'records': records, 'comments': observed, 'notices': notices}
+                        'records': records, 'comments': observed, 'notices': notices,
+                        'coverage': scan_coverage(config)}
             atomic_json(Path(comments_state_path), updated)
             return snapshot
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
