@@ -22,7 +22,11 @@
 
 优先使用用户或项目已提供的模板包与契约，不用公开模板覆盖项目已确认的结构。通过 `npx skills` 安装时，只会安装 Skill 子目录，仓库中的 `template/` 不会一同安装。
 
-本版 Skill 为 `1.2.2`，配套模板结构仍为 `1.2.0`。完整包位于 [v1.2.2 Release](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.2.2)：下载资产 [lark-dev-workflow-v1.2.2.zip](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.2.2/lark-dev-workflow-v1.2.2.zip)，解压后找到包内 `template/schema.json`。首次接入在已有授权范围内获取并保存该配套文件，再把实际路径传给 `onboard.py --contract`；不要把安装目录下不存在的 `template/` 当成默认路径。获取所选 Skill Release 附带的模板契约，并按 `template/schema.json` 记录模板结构版本；Skill 和模板结构的版本号可以不同；新版本不能静默替换已有项目的契约或映射。
+本版 Skill 为 `1.3.0`，配套模板结构为 `1.2.0`。创建或复制这一版标准模板时，可从 [v1.3.0 Release](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.3.0) 下载 [完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.3.0/lark-dev-workflow-v1.3.0.zip)，使用包内 `template/schema.json`。Skill 与模板结构版本分别维护。
+
+首次绑定早已复制的旧 Base 时，先核对它原来的模板版本、配套结构说明和当前实际字段；即使尚无本地配置，也不能直接套用当前 Skill 附带的最新契约。原版本不明或找不到原契约时，保留实际只读发现结果，说明无法核实的能力；可按 [项目配置](project-mapping.md) 人工建立有依据的映射，不编造模板版本、不宣称完整兼容，也不改表来迎合新契约。
+
+将已核实适用于该副本的契约路径传给 `onboard.py --contract`，不要把安装目录下不存在的 `template/` 当成默认路径。Skill 版本与模板结构版本分别记录；已有项目的原契约和映射不会因升级 Skill 被替换。
 
 ### 复制与核实
 
