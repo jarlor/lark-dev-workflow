@@ -1,5 +1,7 @@
 """Offline behavior checks for cron-driven work; never invoke real Feishu or Codex."""
+import contextlib
 import copy
+import io
 import json
 import os
 from pathlib import Path
@@ -33,7 +35,8 @@ class RuntimeFixture(unittest.TestCase):
             'base': {'token': 'FixtureBase'},
             'scope': {'mode': 'project_record', 'project_table_id': 'tblProjects',
                       'project_record_id': 'recProject'},
-            'tables': {'work': {'id': 'tblWork', 'fields': {'title': {'id': 'fldTitle'}}}},
+            'tables': {'projects': {'id': 'tblProjects', 'fields': {'title': {'id': 'fldProjectTitle'}}},
+                       'work': {'id': 'tblWork', 'fields': {'title': {'id': 'fldTitle'}}}},
             'documents': {'details': {'token': 'FixtureDoc', 'anchor': 'sectionOne'}},
         }
         write_json(self.project_path, self.binding)
@@ -305,6 +308,172 @@ class SchedulingTests(RuntimeFixture):
             self.snapshot['records']['tblWork/recItem']['fields']['fldTitle'] = str(revision)
             self.assertEqual(self.tick()['status'], 'ran')
         self.assertEqual(self.state()['idle_wakes'], 0)
+
+
+class GovernancePromptTests(RuntimeFixture):
+    def setUp(self):
+        super().setUp()
+        self.rules = self.work / 'AGENTS.md'
+        self.rules.write_text('仅本地处理；禁止评论、@ 和外部通知。', encoding='utf-8')
+        self.binding['governance'] = {
+            'rules_reference': 'AGENTS.md', 'delivery_report_channel': '本轮运行结果',
+            'ledger_maintainer': 'project owner',
+        }
+        write_json(self.project_path, self.binding)
+
+    def run_tick(self, **kwargs):
+        return m.tick(self.config_path, collector=kwargs.get('collector', self.collect),
+                      executor=kwargs.get('executor', self.execute), clock=lambda: self.timestamp)
+
+    def context(self):
+        prompt = self.calls[-1]['prompt']
+        return json.loads(prompt.split('本轮本地配置与输入位置：\n', 1)[1])
+
+    def test_first_and_resumed_prompts_include_current_rules_and_governance(self):
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        context = self.context()
+        self.assertEqual(context['governance'], self.binding['governance'])
+        self.assertEqual(context['project_rules']['source'], str(self.rules.resolve()))
+        self.assertEqual(context['project_rules']['content'], self.rules.read_text(encoding='utf-8'))
+        self.assertIsNone(self.calls[0]['state']['session_id'])
+        self.rules.write_text('更新约定：仅在批准的文档留言，不得 @。', encoding='utf-8')
+        self.binding['governance']['delivery_report_channel'] = '指定文档'
+        write_json(self.project_path, self.binding)
+        self.timestamp += 86400
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        self.assertEqual(self.calls[-1]['state']['session_id'], self.session)
+        self.assertEqual(self.context()['governance'], self.binding['governance'])
+        self.assertEqual(self.context()['project_rules']['content'], self.rules.read_text(encoding='utf-8'))
+
+    def test_recovery_prompt_includes_rules_and_prior_effects(self):
+        def interrupted(*args):
+            self.execute(*args)
+            raise m.RunnerError('interrupted fixture')
+        self.assertEqual(self.run_tick(executor=interrupted)['status'], 'failed')
+        m.control_state(self.config_path, 'recover')
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        self.assertIsNotNone(self.context()['recovery_note'])
+        self.assertIsNotNone(self.context()['previous_interrupted_run'])
+        self.assertEqual(self.context()['project_rules']['content'], self.rules.read_text(encoding='utf-8'))
+
+    def test_absolute_rules_path_and_optional_reference(self):
+        self.binding['governance']['rules_reference'] = str(self.rules)
+        write_json(self.project_path, self.binding)
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        self.assertEqual(self.context()['project_rules']['source'], str(self.rules))
+        del self.binding['governance']['rules_reference']
+        write_json(self.project_path, self.binding)
+        self.timestamp += 86400
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        self.assertEqual(self.context()['governance'], self.binding['governance'])
+        self.assertIsNone(self.context()['project_rules'])
+
+    def test_missing_rules_never_executes_or_advances_checkpoint(self):
+        self.rules.unlink()
+        self.assertEqual(self.run_tick()['status'], 'failed')
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(self.state()['checkpoint'])
+        self.assertNotIn('inflight', self.state())
+        self.rules.write_text('恢复规则', encoding='utf-8')
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        checkpoint = self.state()['checkpoint']
+        self.rules.unlink()
+        self.snapshot['comments']['new'] = {'revision': 'pending'}
+        self.assertEqual(self.run_tick()['status'], 'failed')
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(self.state()['checkpoint'], checkpoint)
+        self.assertNotIn('inflight', self.state())
+
+    def assert_rebinding_during_collection_is_rejected(self, *, previous_run):
+        if previous_run:
+            self.assertEqual(self.run_tick()['status'], 'ran')
+            checkpoint = self.state()['checkpoint']
+        else:
+            checkpoint = None
+        previous_calls = len(self.calls)
+        self.snapshot['comments']['new'] = {'revision': 'pending'}
+        def rebind_while_collecting(*args, **kwargs):
+            snapshot = self.collect(*args, **kwargs)
+            changed = copy.deepcopy(self.binding)
+            changed['scope']['project_record_id'] = 'recOtherProject'
+            del changed['governance']['rules_reference']
+            write_json(self.project_path, changed)
+            return snapshot
+        result = self.run_tick(collector=rebind_while_collecting)
+        self.assertEqual(result['status'], 'failed')
+        self.assertFalse(result['checkpoint_advanced'])
+        self.assertEqual(len(self.calls), previous_calls)
+        self.assertEqual(self.state()['checkpoint'], checkpoint)
+        self.assertNotIn('inflight', self.state())
+        self.assertFalse((Path(self.config['state_dir']) / 'PAUSED').exists())
+
+    def test_initial_collection_rebinding_never_executes_old_snapshot_with_new_rules(self):
+        self.assert_rebinding_during_collection_is_rejected(previous_run=False)
+
+    def test_later_collection_rebinding_preserves_checkpoint(self):
+        self.assert_rebinding_during_collection_is_rejected(previous_run=True)
+
+    def test_invalid_or_non_file_reference_fails_closed(self):
+        for reference in ['', None, 42, str(self.work), 'https://example.com/rules']:
+            with self.subTest(reference=reference):
+                self.binding['governance']['rules_reference'] = reference
+                write_json(self.project_path, self.binding)
+                self.assertEqual(self.run_tick()['status'], 'failed')
+                self.assertEqual(self.calls, [])
+                self.assertIsNone(self.state()['checkpoint'])
+                self.assertNotIn('inflight', self.state())
+
+    def test_unreadable_or_invalid_utf8_rules_fail_without_starting(self):
+        original_read = Path.read_text
+        def denied(path, *args, **kwargs):
+            if path == self.rules:
+                raise PermissionError('fixture permission denied')
+            return original_read(path, *args, **kwargs)
+        with mock.patch.object(Path, 'read_text', denied):
+            result = self.run_tick()
+        self.assertEqual(result['status'], 'failed')
+        self.assertIn('governance.rules_reference', result['message'])
+        self.rules.write_bytes(b'\xff\xfe')
+        self.assertEqual(self.run_tick()['status'], 'failed')
+        with contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 1)
+        self.assertEqual(self.calls, [])
+        self.assertIsNone(self.state()['checkpoint'])
+        self.assertNotIn('inflight', self.state())
+
+    def test_malformed_governance_fails_clearly_and_absent_governance_is_optional(self):
+        for value in [None, [], 'AGENTS.md']:
+            with self.subTest(value=value):
+                self.binding['governance'] = value
+                write_json(self.project_path, self.binding)
+                result = self.run_tick()
+                self.assertEqual(result['status'], 'failed')
+                self.assertIn('governance', result['message'])
+        self.assertEqual(self.calls, [])
+        del self.binding['governance']
+        write_json(self.project_path, self.binding)
+        self.assertEqual(self.run_tick()['status'], 'ran')
+        self.assertEqual(self.context()['governance'], {})
+        self.assertIsNone(self.context()['project_rules'])
+
+    def test_check_rejects_missing_project_scope_or_table_mapping(self):
+        for target, key in [('scope', 'project_table_id'), ('tables', 'projects')]:
+            with self.subTest(target=target, key=key):
+                incomplete = copy.deepcopy(self.binding)
+                del incomplete[target][key]
+                write_json(self.project_path, incomplete)
+                with contextlib.redirect_stderr(io.StringIO()):
+                    self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 1)
+        self.assertEqual(self.calls, [])
+
+    def test_check_reads_rules_locally_without_remote_collection(self):
+        with mock.patch.object(m, 'collect_snapshot', side_effect=AssertionError('local check only')):
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 0)
+            self.rules.unlink()
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(m.main(['check', '--config', str(self.config_path)]), 1)
+        self.assertEqual(self.calls, [])
 
 
 class CodexProcessTests(RuntimeFixture):

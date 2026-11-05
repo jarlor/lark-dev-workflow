@@ -10,10 +10,14 @@
 
 - Linux、可用的用户 `crontab`、Python 3.9+、Codex CLI、Lark CLI。`.sh` 是统一入口，JSON、分页和状态处理使用随包 Python 脚本，只需标准库，无需 `jq`。
 - 在执行 cron 的同一 Linux 用户下完成 Codex 与飞书登录。飞书使用已核实的 user 身份和指定 profile，不使用 bot。凭据由各 CLI 管理，不写进项目配置、Skill 或 cron。
-- 项目已按 [首次接入](onboarding.md) 生成格式 2、`scope.mode=project_record` 的配置，记录和文档都绑定真实项目。旧配置仍可用于原有流程；无人值守入口只接受这一明确项目范围，不自动迁移。
+- 项目使用格式 2、`scope.mode=project_record` 的配置，表、字段和项目关系已按实际结构核实。只用 Base 的项目可以保留 `documents={}`；已绑定的 Docx 才参与文档评论采集，不为运行器新建文档。旧人工局部映射仍可用于原有流程，不能只改格式号就用于自动扫描。
 - Linux 上已有项目工作目录和必要的 `lark-base`、`lark-doc`、`lark-drive`、`lark-shared` 技能。沿用该项目的执行权限与业务授权。脚本不添加全盘访问或绕过沙箱；没有执行权限的动作会失败并留下原因。
 
 首先用各 CLI 的状态／帮助命令核对登录及版本。Codex 需支持 `exec`、按会话 ID `exec resume`、`--json`、`--output-schema` 和 `--output-last-message`。脚本协议按 Codex CLI 0.159.2 和 Lark CLI 1.0.94 的接口编写；不依赖实时事件订阅。项目实际可读写范围仍需在目标 Linux 机器核实。
+
+自动扫描需要 `scope.project_table_id`、顶层 `project_number`、各表的 `id` 与真实 `fields` 映射。非项目表的 `project` 关联必须指向同一项目表；反馈表还需 `project_input` 和 `status`。补齐映射时先只读核实字段 ID、类型和关联目标，另存候选配置并比较原项目身份，不机械改键或编造字段。
+
+无人值守的新会话不继承当前聊天。把已经确认的沟通、授权和暂停约束写入本机项目规则，并在项目绑定的 `governance.rules_reference` 中引用。该字段用于无人值守时是本地文件路径：相对路径以 `workdir` 为基准，也接受绝对路径；运行器每轮载入实际内容，引用不可读就停止该轮。原有项目规则继续适用，不把某个项目的禁止评论约定写成所有项目的默认规则。
 
 ## 配置并试跑
 
