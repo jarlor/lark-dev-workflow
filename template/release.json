@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "1.4.1",
+    "skill_version": "1.4.2",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -84,7 +84,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v1.2.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.4.1",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.4.2",
   "documentation_updated_on": "2026-11-06",
   "validation_history": {
     "1.1.0": {
@@ -192,32 +192,55 @@
         "unassigned_feedback_intake_without_verified_project_input"
       ],
       "target_linux_installed": false
+    },
+    "1.4.1": {
+      "version": "1.4.1",
+      "date": "2026-11-06",
+      "scope": [
+        "per_run_worker_time_budget_from_active_config",
+        "fresh_time_budget_for_initial_continuation_and_recovery",
+        "bounded_progress_and_readback_before_result",
+        "existing_timeout_recovery_and_checkpoint_guards_preserved"
+      ],
+      "not_validated": [
+        "real_long_comment_threads_and_resolved_thread_samples",
+        "large_base_performance",
+        "real_login_expiry_and_permission_change",
+        "browser_write_and_cron_end_to_end",
+        "unassigned_feedback_intake_without_verified_project_input",
+        "long_running_browser_worker_avoids_timeout_in_all_cases"
+      ],
+      "target_linux_installed": false,
+      "tests": 225,
+      "environments": [
+        "Python 3.9.6 and Node.js local",
+        "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
+      ]
     }
   },
   "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "1.4.1",
+  "release_version": "1.4.2",
   "skill_release_validation": {
-    "version": "1.4.1",
+    "version": "1.4.2",
     "date": "2026-11-06",
     "scope": [
-      "per_run_worker_time_budget_from_active_config",
-      "fresh_time_budget_for_initial_continuation_and_recovery",
-      "bounded_progress_and_readback_before_result",
-      "existing_timeout_recovery_and_checkpoint_guards_preserved"
+      "recipient_relevance_before_commenting",
+      "formal_write_readback_without_mandatory_receipt",
+      "split_requirement_and_bug_confirmation_preserved",
+      "material_limitations_and_project_notification_rules_preserved"
     ],
     "not_validated": [
+      "live_comment_behavior_after_this_instruction_update",
       "real_long_comment_threads_and_resolved_thread_samples",
       "large_base_performance",
       "real_login_expiry_and_permission_change",
-      "browser_write_and_cron_end_to_end",
-      "unassigned_feedback_intake_without_verified_project_input",
       "long_running_browser_worker_avoids_timeout_in_all_cases"
     ],
     "target_linux_installed": false,
-    "tests": 225,
-    "environments": [
-      "Python 3.9.6 and Node.js local",
-      "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
-    ]
+    "automated_tests_reused": 225,
+    "automated_tests_source_version": "1.4.1",
+    "executable_and_test_files_unchanged": true,
+    "independent_behavior_cases": 6,
+    "independent_behavior_result": "passed_with_synthetic_inputs_no_live_writes"
   }
 }
