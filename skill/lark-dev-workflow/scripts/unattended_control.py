@@ -32,6 +32,7 @@ CONFIG_FIELDS = frozenset({
     'reconcile_interval_seconds',
 })
 BROWSER_CONFIG_FIELDS = (CONFIG_FIELDS - {'lark_bin', 'lark_profile'}) | {'access'}
+OPTIONAL_CONFIG_FIELDS = {'session_max_runs': 4}
 
 
 def _text(value, name, *, optional=False):
@@ -104,11 +105,13 @@ def _validate(value, config_path):
     if type(version) is not int or version not in (1, 2):
         raise ControlError('Runner configuration format_version must be 1 (CLI) or 2 (browser).')
     expected = CONFIG_FIELDS if version == 1 else BROWSER_CONFIG_FIELDS
-    if set(value) != expected:
+    if set(value) - set(OPTIONAL_CONFIG_FIELDS) != expected:
         missing = sorted(expected - set(value))
-        unknown = sorted(set(value) - expected)
+        unknown = sorted(set(value) - expected - set(OPTIONAL_CONFIG_FIELDS))
         raise ControlError(f'Configuration fields differ: missing={missing}, unknown={unknown}.')
     result = dict(value)
+    for name, default in OPTIONAL_CONFIG_FIELDS.items():
+        result[name] = _positive_int(value.get(name, default), name)
     path_fields = ('project_config', 'workdir', 'state_dir', 'python_bin', 'codex_bin')
     if version == 1:
         path_fields += ('lark_bin',)

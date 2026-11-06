@@ -20,6 +20,9 @@ from onboard import OnboardingError, atomic_json, read_json
 import comments
 import unattended_control as control
 import watch
+import run_context
+import work_packet
+import own_effects
 
 HERE = Path(__file__).resolve().parent
 RESULT_SCHEMA = {
@@ -175,6 +178,20 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
         'run_budget': run_budget,
         'skill_file': str(HERE.parent / 'SKILL.md'), 'project_config': config['project_config'],
         'access': access_context(config), 'snapshot_file': str(snapshot_file),
+        'work_packet_file': (str(Path(snapshot_file).with_name('work-packet.json'))
+                             if Path(snapshot_file).with_name('work-packet.json').exists() else None),
+        'previous_snapshot_file': (str(Path(snapshot_file).with_name('previous-snapshot.json'))
+                                   if Path(snapshot_file).with_name('previous-snapshot.json').exists() else None),
+        'comments_journal_file': str(Path(config['state_dir']) / (
+            'browser-comments-state.json' if config['format_version'] == 2 else 'comments-state.json')),
+        'optional_effects_file': str(Path(snapshot_file).with_name('effects.json')),
+        'session_policy': {
+            'max_successful_runs': config.get('session_max_runs', 4),
+            'handoff_due': run_context.session_runs(state, config.get('session_max_runs', 4)) + 1
+                           >= config.get('session_max_runs', 4),
+            'handoff_file': str(Path(snapshot_file).with_name('handoff.json')),
+        },
+        'session_handoff': state.get('session_handoff'),
         'previous_result': state.get('last_result'),
         'recovery_note': state.get('recovery_note'),
         'previous_interrupted_run': (state.get('recoveries') or [{}])[-1].get('inflight'),
@@ -266,6 +283,7 @@ def execute(config, state, run_dir, prompt, lock_fd, save_state):
     session_id, completed, failed = read_events(run_dir / 'events.jsonl', state.get('session_id'))
     if session_id:
         state['session_id'] = session_id
+        state['inflight']['attempt_session_id'] = session_id
         save_state()
     if interrupted_run:
         raise RunnerError('本轮已中断或超时；可能有部分写入，需核对后恢复。')
@@ -308,6 +326,38 @@ def scan_only(config_path, *, collector=watch.collect):
                 'codex_started': False, 'checkpoint_advanced': False}
 
 
+def matches_own_effects(directory, state, baseline, snapshot_id):
+    """Only a complete subsequent scan matching the exact predicted changes can skip a wake."""
+    result = state.get('last_result') or {}
+    run_id = result.get('run_id')
+    if (baseline is None or not isinstance(run_id, str) or Path(run_id).name != run_id
+            or state.get('effects_consumed_run') == run_id):
+        return False
+
+
+    path = Path(directory) / 'runs' / run_id / 'effects.json'
+    if not path.exists():
+        return False
+    try:
+        expected = own_effects.expected_snapshot(baseline, read_json(path), run_id,
+                                                result.get('snapshot_id'))
+        return digest(stable_snapshot(expected)) == snapshot_id
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        # An optimization artifact cannot block business or consume unverified input.
+        state['optimization_note'] = f'Own-write shortcut ignored: {type(exc).__name__}.'
+        return False
+
+
+def optional_json(path, value, state):
+    """Optimization output is expendable; the run's source snapshot/state are not."""
+    try:
+        atomic_json(path, value)
+        return True
+    except (OSError, ValueError, TypeError):
+        state['optimization_note'] = f'Optional {Path(path).name} unavailable; use original inputs.'
+        return False
+
+
 def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.time):
     config = control.load_config(config_path)
     directory, state_path, paused = state_paths(config)
@@ -333,12 +383,25 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             timestamp = clock()
             state['last_scan_at'] = now()
             state['last_observed_snapshot'] = snapshot_id
+            baseline = run_context.checkpoint_snapshot(directory, state)
             run, reason = should_run(state, snapshot_id, timestamp, config['reconcile_interval_seconds'])
+            own_only = (reason == 'changed' and matches_own_effects(directory, state, baseline, snapshot_id))
+            if own_only:
+                # Test due work against the predicted checkpoint; do not consume a whole END scan.
+                due_state = dict(state, checkpoint=snapshot_id)
+                run, reason = should_run(due_state, snapshot_id, timestamp,
+                                         config['reconcile_interval_seconds'])
             if not run:
                 state['idle_wakes'] = 0
                 state.pop('last_error', None)
+                if own_only:
+                    state['checkpoint'] = snapshot_id
+                    state['effects_consumed_run'] = state['last_result']['run_id']
+                    optional_json(directory / 'checkpoint-snapshot.json', snapshot, state)
                 save()
-                return {'status': 'unchanged', 'message': '没有变化，本轮不启动 Codex。'}
+                return {'status': 'unchanged', 'own_writes_verified': own_only,
+                        'message': '仅有已核实的自身写入，本轮不启动 Codex。' if own_only
+                                   else '没有变化，本轮不启动 Codex。'}
             if paused.exists():
                 return {'status': 'paused'}
             if state.get('idle_wakes', 0) >= config['max_consecutive_runs'] and reason == 'changed':
@@ -349,16 +412,38 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             run_dir = directory / 'runs' / run_id
             run_dir.mkdir(parents=True, mode=0o700)
             atomic_json(run_dir / 'snapshot.json', snapshot)
+            packet_baseline = baseline
+            if baseline is not None and not optional_json(run_dir / 'previous-snapshot.json', baseline, state):
+                packet_baseline = None
+            packet = work_packet.build_work_packet(snapshot, packet_baseline, binding)
+            packet_written = optional_json(run_dir / 'work-packet.json', packet, state)
+            previous_session = state.get('session_id')
+            session_plan = run_context.prepare_session(state, directory, config['session_max_runs'])
+            state['session_runs'] = run_context.session_runs(state, config['session_max_runs'])
             prompt = build_prompt(config, state, run_id, snapshot_id, run_dir / 'snapshot.json',
                                   reason, binding)
             state['inflight'] = {'run_id': run_id, 'snapshot_id': snapshot_id,
-                                 'started_at': now(), 'directory': str(run_dir), 'phase': 'starting'}
+                                 'started_at': now(), 'directory': str(run_dir), 'phase': 'starting',
+                                 'session_mode': session_plan['mode'],
+                                 'previous_session_id': previous_session,
+                                 'attempt_session_id': state.get('session_id')}
+            optional_json(run_dir / 'input-stats.json', {
+                'snapshot_bytes': (run_dir / 'snapshot.json').stat().st_size,
+                'work_packet_bytes': (len((json.dumps(packet, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
+                                      if packet_written else None),
+                'prompt_bytes': len(prompt.encode('utf-8')),
+                'session_mode': session_plan['mode'],
+                'note': 'File sizes, not model token counts or a billing estimate.',
+            }, state)
             save()
             result, session_id = executor(config, state, run_dir, prompt, lock_fd, save)
             validate_result(result, run_id, snapshot_id)
             # Only the START snapshot is delivered. Changes made during execution remain visible.
             state.update(checkpoint=snapshot_id, session_id=session_id,
                          last_result=result, last_success_at=now(), last_success_epoch=clock())
+            state['session_runs'] = run_context.session_runs(state, config['session_max_runs']) + 1
+            state.pop('session_handoff', None)
+            optional_json(directory / 'checkpoint-snapshot.json', snapshot, state)
             delay = result['retry_after_seconds']
             if result['outcome'] == 'continue':
                 delay = max(delay, config['interval_minutes'] * 60)
@@ -403,7 +488,8 @@ def control_state(config_path, action):
         if action == 'recover' and state:
             inflight = state.get('inflight')
             if inflight:
-                session_id, _, _ = read_events(Path(inflight['directory']) / 'events.jsonl', state.get('session_id'))
+                expected_session = inflight.get('attempt_session_id', state.get('session_id'))
+                session_id, _, _ = read_events(Path(inflight['directory']) / 'events.jsonl', expected_session)
                 if session_id:
                     state['session_id'] = session_id
             state.setdefault('recoveries', []).append({'at': now(), 'inflight': state.pop('inflight', None)})

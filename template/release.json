@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "1.4.2",
+    "skill_version": "1.5.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -45,7 +45,8 @@
         "comment_scope": "native_sdk_visible_model",
         "consistency": "two_complete_passes_equal",
         "scan_timeout_seconds": 300
-      }
+      },
+      "optional_session_max_runs_default": 4
     }
   },
   "validation_status": "comments_and_light_collaboration_validated_with_single_user",
@@ -72,7 +73,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 225,
+  "automated_tests_passed": 278,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -84,7 +85,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v1.2.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.4.2",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.5.0",
   "documentation_updated_on": "2026-11-06",
   "validation_history": {
     "1.1.0": {
@@ -216,31 +217,60 @@
         "Python 3.9.6 and Node.js local",
         "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
       ]
+    },
+    "1.4.2": {
+      "version": "1.4.2",
+      "date": "2026-11-06",
+      "scope": [
+        "recipient_relevance_before_commenting",
+        "formal_write_readback_without_mandatory_receipt",
+        "split_requirement_and_bug_confirmation_preserved",
+        "material_limitations_and_project_notification_rules_preserved"
+      ],
+      "not_validated": [
+        "live_comment_behavior_after_this_instruction_update",
+        "real_long_comment_threads_and_resolved_thread_samples",
+        "large_base_performance",
+        "real_login_expiry_and_permission_change",
+        "long_running_browser_worker_avoids_timeout_in_all_cases"
+      ],
+      "target_linux_installed": false,
+      "automated_tests_reused": 225,
+      "automated_tests_source_version": "1.4.1",
+      "executable_and_test_files_unchanged": true,
+      "independent_behavior_cases": 6,
+      "independent_behavior_result": "passed_with_synthetic_inputs_no_live_writes"
     }
   },
   "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "1.4.2",
+  "release_version": "1.5.0",
   "skill_release_validation": {
-    "version": "1.4.2",
+    "version": "1.5.0",
     "date": "2026-11-06",
     "scope": [
-      "recipient_relevance_before_commenting",
-      "formal_write_readback_without_mandatory_receipt",
-      "split_requirement_and_bug_confirmation_preserved",
-      "material_limitations_and_project_notification_rules_preserved"
+      "deterministic_delta_and_complete_record_index",
+      "complete_related_comment_threads_and_original_sources",
+      "exact_own_write_prediction_requires_full_next_scan_match",
+      "successful_session_rotation_with_verified_handoff_and_recovery",
+      "optional_artifact_failure_preserves_business_execution",
+      "independent_worker_behavior_with_partial_confirmation_and_pending_work",
+      "read_only_replay_of_existing_saved_snapshots"
     ],
     "not_validated": [
-      "live_comment_behavior_after_this_instruction_update",
+      "guaranteed_token_or_billing_reduction",
+      "all_long_running_business_workloads",
+      "live_self_write_receipts_and_session_rotation_after_this_upgrade",
       "real_long_comment_threads_and_resolved_thread_samples",
       "large_base_performance",
-      "real_login_expiry_and_permission_change",
-      "long_running_browser_worker_avoids_timeout_in_all_cases"
+      "real_login_expiry_and_permission_change"
     ],
     "target_linux_installed": false,
-    "automated_tests_reused": 225,
-    "automated_tests_source_version": "1.4.1",
-    "executable_and_test_files_unchanged": true,
-    "independent_behavior_cases": 6,
-    "independent_behavior_result": "passed_with_synthetic_inputs_no_live_writes"
+    "tests": 278,
+    "environments": [
+      "Python 3.9.6 local",
+      "Python 3.10.12 isolated directory on target Linux"
+    ],
+    "independent_review": "passed_after_optional_artifact_failure_fix",
+    "independent_behavior_cases": 3
   }
 }
