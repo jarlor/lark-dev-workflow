@@ -1,6 +1,6 @@
 <title>测试与交付证据</title>
 <p>这是共享研发 Base 的复杂验证与交付证据容器，按项目分节。当前是空模板，尚无项目测试或交付结论。状态、执行记录和真实关联以表格为准。</p>
-<p>模板规范 v2.0.0，配套 lark-dev-workflow v2.0.0 Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.0">v2.0.0 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
+<p>模板规范 v2.0.0，配套 lark-dev-workflow v2.0.1 Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.1">v2.0.1 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
 <h1 seq="auto">按项目定位</h1>
 <p>项目初始化时，在“06 项目”取得真实 record ID 和自动编号，再在本文建立“真实项目编号 · 项目名称”章节，取得实际 block ID，将完整章节 URL 回填该项目行的“测试与交付文档”。也可使用独立项目 Docx。</p>
 <p>Agent 从选定项目行解析 URL 与真实锚点，核实项目编号后，只读写本项目节。Base 中同名文档只是容器，不能据此猜测业务归属；复制模板后重新核对实际链接。</p>
@@ -31,4 +31,4 @@
 <p>评论中的测试回报优先补充已有执行证据，不重新创建同一测试或需求。先正式回写并回读，再记录处理状态；回复和解决评论分别保留回执，不能把评论解决当作测试通过或产品完成。本地采集水位不提供多人全局去重或占用保证。</p>
 <p>日常研发进度写 03，项目和版本摘要在里程碑变化时汇总。已结束且没有后续动作时，不编造下一步；确需人介入时明确一个具体请求。</p>
 <p>本文保持简洁，必要截图随相应项目章节保存。完整日志、JSON、压缩包和其他机器制品放在 Git、CI 或构建存储。报告只陈述实际验证的范围，结构接入通过不代表表单提交或完整业务流程通过。</p>
-<p>标题、计划、说明和评论都用简单直接的话，让人一眼知道要做什么、结果怎样、需要自己做什么。内部排查过程留在工作记录里。<a href="https://github.com/jarlor/lark-dev-workflow/blob/v2.0.0/skill/lark-dev-workflow/references/workflow.md">查看完整流程图和人、AI 的分工</a>。</p>
+<p>标题、计划、说明和评论都用简单直接的话，让人一眼知道要做什么、结果怎样、需要自己做什么。内部排查过程留在工作记录里。<a href="https://github.com/jarlor/lark-dev-workflow/blob/v2.0.1/skill/lark-dev-workflow/references/workflow.md">查看完整流程图和人、AI 的分工</a>。</p>

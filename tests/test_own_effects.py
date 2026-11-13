@@ -1,5 +1,6 @@
 """Offline receipt validation; all accounts, content and evidence are fictitious."""
 import copy
+import json
 from pathlib import Path
 import sys
 import tempfile
@@ -310,6 +311,68 @@ class OwnEffectsTests(unittest.TestCase):
                        'readback_evidence': 'tool-result:fixture-real-normalization'}]}
         derived = m.expected_snapshot(start, receipt, self.run, receipt['snapshot_id'])
         self.assertEqual(derived, after)
+
+    def test_native_stage_snapshot_preserves_schema_and_does_not_hide_concurrent_changes(self):
+        from test_browser_watch import fixture, stage_field
+        import browser_watch
+        import watch
+        binding, access, payload = fixture()
+        raw = stage_field()
+        binding['tables']['work']['fields']['status'] = browser_watch.field(raw)
+        table = payload['tables']['tblWork']
+        table['fields'].append(raw)
+        cells = table['rows'][0]['cells']
+        cells[raw['id']] = {'value': 'optWait'}
+        with tempfile.TemporaryDirectory() as directory:
+            def scan():
+                return watch.collect_with_reader(binding, browser_watch.Reader(binding, access, payload),
+                                                 comments_state_path=Path(directory) / 'comments.json')
+            start = scan()
+            cells['fldTitle'] = {'value': 'Exact worker title readback'}
+            after = scan()
+            receipt = {'format_version': 1, 'run_id': self.run, 'snapshot_id': snapshot_id(start),
+                       'record_fields': [{'record_key': 'tblWork/recWork', 'field_id': 'fldTitle',
+                           'before': start['records']['tblWork/recWork']['fields']['fldTitle'],
+                           'after': after['records']['tblWork/recWork']['fields']['fldTitle'],
+                           'readback_evidence': 'tool-result:fixture-stage-title-readback'}], 'comments': []}
+            original, original_receipt = copy.deepcopy(start), copy.deepcopy(receipt)
+            derived = m.expected_snapshot(start, receipt, self.run, receipt['snapshot_id'])
+            self.assertEqual(derived, after)
+            self.assertEqual(derived['stage_fields'], start['stage_fields'])
+            state = {'last_result': {'run_id': self.run, 'snapshot_id': receipt['snapshot_id']}}
+            effects = Path(directory) / 'runs' / self.run / 'effects.json'
+            effects.parent.mkdir(parents=True)
+            effects.write_text(json.dumps(receipt), encoding='utf-8')
+            self.assertTrue(unattended.matches_own_effects(directory, state, start, snapshot_id(after)))
+
+            # A human advances the node alongside the title write. It is not in
+            # the receipt and must still wake the worker.
+            cells[raw['id']] = {'value': 'optReady'}
+            self.assertFalse(unattended.matches_own_effects(directory, state, start, snapshot_id(scan())))
+            cells[raw['id']] = {'value': 'optWait'}
+            # Configuration changes must also remain visible when all record
+            # values match the explicitly acknowledged writes.
+            raw['property']['options'][0]['transitionRule']['permissionFieldIds'] = ['fldAnotherOwner']
+            changed_schema = scan()
+            self.assertEqual(changed_schema['records'], after['records'])
+            self.assertFalse(unattended.matches_own_effects(directory, state, start, snapshot_id(changed_schema)))
+            forbidden = copy.deepcopy(receipt)
+            forbidden['stage_fields'] = changed_schema['stage_fields']
+            with self.assertRaises(m.OwnEffectsError):
+                m.expected_snapshot(start, forbidden, self.run, receipt['snapshot_id'])
+            derived['stage_fields'].clear()
+            self.assertEqual(start, original)
+            self.assertEqual(receipt, original_receipt)
+
+    def test_stage_metadata_is_optional_and_unknown_snapshot_properties_still_reject(self):
+        self.assertNotIn('stage_fields', self.derive())
+        for extra in ({'stage_fields': None}, {'stage_fields': []}, {'stage_fields': 'unknown'},
+                      {'stage_fields': {}, 'future_schema': {}}):
+            with self.subTest(extra=extra):
+                start = dict(self.start, **extra)
+                receipt = dict(self.receipt, snapshot_id=snapshot_id(start))
+                with self.assertRaises(m.OwnEffectsError):
+                    self.derive(receipt, start=start, sid=receipt['snapshot_id'])
 
 
 if __name__ == '__main__':

@@ -138,6 +138,7 @@ def expected_snapshot(start_snapshot, receipt, run_id, snapshot_id):
     Only existing record fields and exact comment additions/content edits are
     supported. Deletions, record creation, ownership moves, thread resolution,
     coverage changes and whole-record replacement cannot be acknowledged here.
+    Optional Stage configuration is preserved unchanged, never receipt-writable.
     ``snapshot_id`` is the runner's SHA-256 of the starting snapshot with only
     its top-level ``observed_at`` removed.
     """
@@ -154,10 +155,10 @@ def _expected_snapshot(start, receipt, run_id, snapshot_id):
              and start['format_version'] == 1, 'A format-1 starting snapshot is required.')
     _require({'records', 'comments'} <= set(start)
              and set(start) <= {'format_version', 'records', 'comments', 'binding',
-                               'notices', 'coverage', 'observed_at'},
+                               'notices', 'coverage', 'stage_fields', 'observed_at'},
              'Unsupported starting snapshot properties.')
     _require(all(type(start[key]) is dict for key in
-                 ('records', 'comments', 'binding', 'notices', 'coverage') if key in start),
+                 ('records', 'comments', 'binding', 'notices', 'coverage', 'stage_fields') if key in start),
              'Snapshot collections must be objects.')
     _require(_nonempty(run_id) and _nonempty(snapshot_id), 'Current run and snapshot IDs are required.')
     _object(receipt, _RECEIPT_KEYS, 'Receipt')

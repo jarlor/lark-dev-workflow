@@ -1,6 +1,6 @@
 <title>需求与 Bug 说明</title>
 <p>这是共享研发 Base 的需求与 Bug 详情容器，按项目分节。当前是空模板，尚未登记项目业务。状态和真实关联以表格记录为准。</p>
-<p>模板规范 v2.0.0，配套 lark-dev-workflow v2.0.0 Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.0">v2.0.0 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
+<p>模板规范 v2.0.0，配套 lark-dev-workflow v2.0.1 Skill。<a href="https://github.com/jarlor/lark-dev-workflow">GitHub 仓库与安装说明</a> · <a href="https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.1">v2.0.1 发布包</a>。先使用模板创建自己的副本，再安装 Skill 并提交副本链接接入；已有项目按所用版本核对差异后升级。</p>
 <h1 seq="auto">按项目定位</h1>
 <p>项目初始化时，先在“06 项目”取得真实 record ID 和自动编号，再在本文建立“真实项目编号 · 项目名称”章节，取得实际 block ID，将完整章节 URL 回填该项目行的“需求与Bug文档”。也可使用独立项目 Docx。</p>
 <p>Agent 从选定项目行解析文档 URL 与真实章节锚点，核实项目编号后，只在该项目节内读写。不要根据 Base 中的同名文档猜测归属，不要写到其他项目节。复制模板不能沿用原项目章节链接。</p>
@@ -28,4 +28,4 @@
 <p>原线程回复只在已有授权覆盖时进行，并按真实 reply ID 和处理标识去重。当前工具不支持回复全文评论或已解决线程时，在当前报告回告；不为技术限制自动恢复评论或改投别处。未完成问题保留线程。</p>
 <p>完全重复的反馈保留原文和来源；相似但范围不同只建立关系。暂停、撤回、取消和转交保留决定及适用范围，不能删除已有交付或失败。反馈项目单选是原始输入，正式归属以受理后核实的真实项目关联为准。</p>
 <p>这里只保存必要的人类可读详情和图片；代码、日志、完整快照与机器制品保存在 Git、CI 或构建存储，用稳定链接引用。</p>
-<p>标题、计划、说明和评论都用简单直接的话，让人一眼知道要做什么、结果怎样、需要自己做什么。内部排查过程留在工作记录里。<a href="https://github.com/jarlor/lark-dev-workflow/blob/v2.0.0/skill/lark-dev-workflow/references/workflow.md">查看完整流程图和人、AI 的分工</a>。</p>
+<p>标题、计划、说明和评论都用简单直接的话，让人一眼知道要做什么、结果怎样、需要自己做什么。内部排查过程留在工作记录里。<a href="https://github.com/jarlor/lark-dev-workflow/blob/v2.0.1/skill/lark-dev-workflow/references/workflow.md">查看完整流程图和人、AI 的分工</a>。</p>
