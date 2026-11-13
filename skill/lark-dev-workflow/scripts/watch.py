@@ -198,7 +198,22 @@ def _fields(cli, config, role, table):
     for key, expected in mapped.items():
         actual = current.get(expected['id'])
         if not actual or actual.get('type') != expected.get('type'):
+            if expected.get('type') == 'stage':
+                raise WatchError(f'{role}.{key}: 未读到可核实的流程字段结构；普通单选读数不能代替流程校验。'
+                                 '请使用已验证的本人网页读取，核对绑定后再继续。')
             raise WatchError(f'{role}.{key}: field is missing or its type changed; recheck the project binding.')
+        if expected.get('type') == 'stage' and not isinstance(actual.get('stage_config'), dict):
+            raise WatchError(f'{role}.{key}: 未完整读取流程节点配置，不能安排工作。')
+        if expected.get('type') == 'stage' and 'stage_contract' in expected:
+            from stage_contract import problems as stage_problems
+            issues = stage_problems(actual, expected['stage_contract'], mapped)
+            if issues:
+                raise WatchError(f'{role}.{key}: ' + ' '.join(issues))
+        if expected.get('type') == 'link':
+            target = expected.get('target_table_id')
+            if not comments.nonempty(target) or link_target(actual) != target:
+                label = 'project link' if key == 'project' else 'link target'
+                raise WatchError(f'{role}.{key}: {label} differs from the bound table; recheck the project binding.')
     if role != 'projects':
         project = mapped.get('project', {})
         actual = current.get(project.get('id'), {})
@@ -230,7 +245,7 @@ def _feedback_options(field, number):
     return sorted(name for name in names if pattern.fullmatch(name))
 
 
-def _read_records(config, cli, scope, tables):
+def _read_records(config, cli, scope, tables, *, stage_fields=None):
     snapshot = {}
     token, project_id = config['base']['token'], scope['project_record_id']
     intake_mode = feedback_intake_mode(config)
@@ -240,6 +255,10 @@ def _read_records(config, cli, scope, tables):
         table = tables[role]
         current = _fields(cli, config, role, table)
         fields = list(table['fields'].values())
+        if stage_fields is not None:
+            for field in fields:
+                if field.get('type') == 'stage':
+                    stage_fields[f"{table['id']}/{field['id']}"] = copy.deepcopy(current[field['id']])
         if role == 'projects':
             rows = [cli.read_record(token, table['id'], project_id, fields)]
             number = table['fields'].get('number')
@@ -344,7 +363,8 @@ def collect_with_reader(config, reader, *, comments_state_path, locations=None, 
                     raise WatchError('Existing comment observations belong to another reader identity; '
                                      'preserve the journal and reconcile before switching accounts or backends.')
                 previous['reader_identity'] = copy.deepcopy(reader_identity)
-            records = _read_records(config, reader, scope, tables)
+            stage_fields = {}
+            records = _read_records(config, reader, scope, tables, stage_fields=stage_fields)
             updated, report = comments.scan(config, previous, reader, include_resolved=True, known=known)
             if report['status'] != 'complete':
                 raise WatchError('Comment scan failed; previous observations were kept: ' + report['error'])
@@ -352,6 +372,8 @@ def collect_with_reader(config, reader, *, comments_state_path, locations=None, 
             snapshot = {'format_version': 1, 'binding': comments.binding_identity(config),
                         'records': records, 'comments': observed, 'notices': notices,
                         'coverage': scan_coverage(config)}
+            if stage_fields:
+                snapshot['stage_fields'] = stage_fields
             atomic_json(Path(comments_state_path), updated)
             return snapshot
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:

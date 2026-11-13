@@ -27,6 +27,14 @@ export async function readTable(input) {
             const value = fieldsById[id];
             if (!value || value.id !== id) throw new Error('missing field');
             const property = value.property || {};
+            if (value.type === 24) {
+              // Stage is not an ordinary select: retain its terminal options,
+              // transition rules and required fields for binding verification.
+              return { id: value.id, name: value.name, type: value.type,
+                fieldUIType: value.fieldUIType || value.exInfo?.fieldUIType,
+                property,
+                ...(Object.hasOwn(value, 'defaultValueRule') ? { defaultValueRule: value.defaultValueRule } : {}) };
+            }
             return { id: value.id, name: value.name, type: value.type,
               property: { ...(Object.hasOwn(property, 'tableId') ? { tableId: property.tableId } : {}),
                 ...(Object.hasOwn(property, 'options') ? { options: property.options.map((x) => ({ id: x.id, name: x.name })) } : {}) } };

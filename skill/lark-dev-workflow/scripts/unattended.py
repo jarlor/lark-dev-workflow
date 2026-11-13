@@ -503,12 +503,25 @@ def control_state(config_path, action):
         return {'status': 'enabled', 'message': '后续轮次可继续，未立即启动 Codex。'}
 
 
+def migrate_binding(config_path, candidate, expected_binding_sha256,
+                    expected_candidate_sha256, handoff=None, *, collector=watch.collect):
+    import binding_migration
+    return binding_migration.migrate(config_path, candidate, expected_binding_sha256,
+                                     expected_candidate_sha256, handoff,
+                                     runtime=sys.modules[__name__], collector=collector)
+
+
 def parser():
     result = argparse.ArgumentParser(description='Linux 定时检查飞书项目并运行 Codex。')
     sub = result.add_subparsers(dest='command', required=True)
-    for name in ['init', 'check', 'scan', 'tick', 'status', 'pause', 'resume', 'recover', 'cron-preview', 'install-cron', 'remove-cron']:
+    for name in ['init', 'check', 'scan', 'tick', 'status', 'pause', 'resume', 'recover', 'migrate-binding', 'cron-preview', 'install-cron', 'remove-cron']:
         child = sub.add_parser(name)
         child.add_argument('--config', required=True, type=Path)
+        if name == 'migrate-binding':
+            child.add_argument('--candidate', required=True, type=Path)
+            child.add_argument('--expected-binding-sha256', required=True)
+            child.add_argument('--expected-candidate-sha256', required=True)
+            child.add_argument('--handoff', type=Path)
         if name == 'init':
             child.add_argument('--project-config', required=True, type=Path)
             child.add_argument('--workdir', required=True, type=Path)
@@ -546,6 +559,9 @@ def main(argv=None):
             output = tick(args.config) if args.command == 'tick' else scan_only(args.config)
         elif args.command in ['status', 'pause', 'resume', 'recover']:
             output = control_state(args.config, args.command)
+        elif args.command == 'migrate-binding':
+            output = migrate_binding(args.config, args.candidate, args.expected_binding_sha256,
+                                     args.expected_candidate_sha256, args.handoff)
         elif args.command == 'cron-preview':
             print(control.cron_preview(args.config))
             return 0

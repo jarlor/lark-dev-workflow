@@ -18,7 +18,7 @@ from onboard import OnboardingError
 HERE = Path(__file__).resolve().parent
 TYPE_NAMES = {1: 'text', 2: 'number', 3: 'select', 4: 'select', 5: 'datetime',
               7: 'checkbox', 11: 'user', 15: 'text', 17: 'attachment', 18: 'link',
-              21: 'link', 1001: 'datetime', 1002: 'datetime', 1005: 'auto_number'}
+              21: 'link', 24: 'stage', 1001: 'datetime', 1002: 'datetime', 1005: 'auto_number'}
 
 
 def fail(message):
@@ -43,7 +43,7 @@ def field(raw):
         if not comments.nonempty(target):
             fail('网页关联字段缺少目标表编号。')
         result['link_table'] = {'id': target}
-    if kind == 'select':
+    if kind in ('select', 'stage'):
         options = prop.get('options')
         if not isinstance(options, list):
             fail('网页选项未完整返回。')
@@ -55,6 +55,16 @@ def field(raw):
                 fail('网页选项缺少编号、名称或发生重复。')
             ids.add(option['id']); names.add(option['name'])
         result.update(multiple=raw['type'] == 4, options=copy.deepcopy(options))
+        if kind == 'stage':
+            if raw.get('fieldUIType') != 'Stage':
+                fail('网页流程字段缺少 Stage 类型标记。')
+            if any(option.get('type') not in ('Default', 'EndDone', 'EndCancel')
+                   or not isinstance(option.get('transitionRule'), dict)
+                   or not isinstance(option.get('fieldsConfigInfo'), list) for option in options):
+                fail('网页流程节点的完成条件或结束类型尚未核实。')
+            result['stage_config'] = {'property': copy.deepcopy(prop)}
+            if 'defaultValueRule' in raw:
+                result['stage_config']['defaultValueRule'] = copy.deepcopy(raw['defaultValueRule'])
     return result
 
 
@@ -78,7 +88,7 @@ def cell_value(raw, schema):
             # A link target or mention may change while the visible label stays
             # identical. Keep structured content in the change snapshot.
             return copy.deepcopy(value)
-    elif kind == 'select':
+    elif kind in ('select', 'stage'):
         selected = [value] if isinstance(value, str) else value
         choices = {x['id']: x['name'] for x in schema['options']}
         if (isinstance(selected, list) and all(isinstance(x, str) and x in choices for x in selected)

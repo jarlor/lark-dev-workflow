@@ -449,18 +449,29 @@ def validate(snapshot, contract, token, url, project_key, project_name, scope,
                 issues.append(f'expected one field named {expected["name"]}, found {len(candidates)}')
             else:
                 field = candidates[0]
-                binding = {k: copy.deepcopy(field[k]) for k in ('id', 'name', 'type', 'style', 'options', 'multiple', 'default_value', 'bidirectional_link_field_id') if k in field}
+                binding = {k: copy.deepcopy(field[k]) for k in ('id', 'name', 'type', 'style', 'options', 'multiple', 'default_value', 'bidirectional_link_field_id', 'stage_config') if k in field}
                 if field.get('type') != expected['type']:
                     issues.append(f'type {field.get("type")} does not match {expected["type"]}')
                 if 'default_value' in expected and field.get('default_value') != expected['default_value']:
                     issues.append('default value is missing or differs from the template')
-                if expected['type'] == 'select':
+                if expected['type'] in ('select', 'stage'):
                     missing = set(option_names(expected)) - set(option_names(field))
                     if missing:
                         issues.append('missing options: ' + ', '.join(sorted(missing)))
                     if bool(field.get('multiple', False)) != bool(expected.get('multiple', False)):
                         issues.append('single/multiple select mismatch')
-                    binding['write_options'] = option_names(field)
+                    if expected['type'] == 'select':
+                        binding['write_options'] = option_names(field)
+                    else:
+                        if 'stage_contract' in expected:
+                            binding['stage_contract'] = copy.deepcopy(expected['stage_contract'])
+                        if not isinstance(field.get('stage_config'), dict):
+                            issues.append('Stage configuration was not read; ordinary select data cannot verify a workflow')
+                        actual_options = {v['name']: v for v in field.get('options', []) if isinstance(v, dict)}
+                        for option in expected.get('options', []):
+                            if isinstance(option, dict) and option.get('type') and (
+                                    actual_options.get(option['name'], {}).get('type') != option['type']):
+                                issues.append('Stage node kind differs: ' + option['name'])
                 if expected['type'] == 'link':
                     target_role = expected.get('target_role')
                     actual_target = link_target(field)
@@ -477,6 +488,14 @@ def validate(snapshot, contract, token, url, project_key, project_name, scope,
             if issues:
                 failed_fields.add(path)
                 errors.extend(path + ': ' + issue for issue in issues)
+        for key, field in target['fields'].items():
+            if field.get('type') == 'stage' and 'stage_contract' in field:
+                from stage_contract import problems as stage_problems
+                issues = stage_problems(field, field['stage_contract'], target['fields'])
+                if issues:
+                    path = f'{role}.{key}'
+                    failed_fields.add(path)
+                    errors.extend(path + ': ' + issue for issue in issues)
         views = actual.get('views', [])
         scoped_views, scope_errors = project_view_coverage(
             actual, mapped.get('projects', {}).get('id'), scope, project_record_id,

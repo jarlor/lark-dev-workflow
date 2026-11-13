@@ -23,6 +23,13 @@ global.setTimeout = (callback, delay) => {
 };
 const fields = {fldText: {id:'fldText',type:1,name:'标题'},
   fldProject: {id:'fldProject',type:18,name:'项目',property:{tableId:'tblProjects'}}};
+if (change === 'stage') fields.fldText = {id:'fldText',type:24,name:'状态',fieldUIType:'Stage',
+  defaultValueRule:{type:'stage_field'},property:{convertMode:'NextStage',options:[
+    {id:'stageWait',name:'待确认计划',type:'Default',transitionRule:{type:'ConditionAndPerson',
+      permissionFieldIds:['fldOwner'],condition:{conjunction:'and',conditions:[
+        {conditionId:'requiredPlan',fieldId:'fldPlan',fieldType:1,operator:'isNotEmpty',value:null}]}},
+      fieldsConfigInfo:[{id:'fldPlan'}]},
+    {id:'stageDone',name:'已交付',type:'EndDone',transitionRule:{type:'Condition'},fieldsConfigInfo:[]}]}};
 const table = {
   fieldsToJSON: () => fields,
   getRecordCount: () => change === 'row-order' ? 2 : 1,
@@ -31,6 +38,7 @@ const table = {
     : change === 'duplicate' ? ['rec1','rec1'] : ['rec1'],
   getRecordDataById: () => {
     const row = {fldText:{value:[{type:'text',text:'示例'}]},fldProject:{value:['recProject']}};
+    if (change === 'stage') row.fldText = {value:'stageWait'};
     if (change === 'missing') delete row.fldProject;
     if (change === 'null') row.fldProject = null;
     if (change === 'changed' && ++reads > 1) row.fldText.value[0].text = '修改后的内容';
@@ -81,6 +89,18 @@ process.stdout.write(JSON.stringify(result));
     def test_incremental_empty_initial_comments_do_not_mean_no_comments(self):
         result = self.run_page(comments=True)
         self.assertEqual(result['status'], 'failed')
+
+    def test_stage_read_keeps_rules_terminal_kinds_and_actual_value(self):
+        result = self.run_page('stage')
+        self.assertEqual(result['status'], 'complete')
+        stage = result['data']['fields'][0]
+        self.assertEqual(stage['fieldUIType'], 'Stage')
+        self.assertEqual(stage['property']['options'][1]['type'], 'EndDone')
+        self.assertIn('transitionRule', stage['property']['options'][0])
+        self.assertEqual(stage['property']['options'][0]['transitionRule']['permissionFieldIds'], ['fldOwner'])
+        self.assertEqual(stage['property']['options'][0]['fieldsConfigInfo'], [{'id': 'fldPlan'}])
+        self.assertEqual(stage['defaultValueRule'], {'type': 'stage_field'})
+        self.assertEqual(result['data']['rows'][0]['cells']['fldText']['value'], 'stageWait')
 
     def run_comments(self, change=None, lengths=(2, 1)):
         threads = []

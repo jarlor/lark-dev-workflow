@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v1.5.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v1.5.0)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v2.0.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.0)**
 
-在线模板名称为 **Agent研发工作流｜v1.2.0**，对应模板规范 `1.2.0`。当前 Skill 与完整包为 **v1.5.0**。 打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+本包 Skill 为 **v2.0.0**，新版模板规范为 **2.0.0**。线上模板的实际版本以页面和 Release 中的部署结果为准；`template/release.json` 保留打包时的核对信息，不能仅凭下载包版本认定线上已升级。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -14,7 +14,19 @@
 
 模板提供结构和入口，Skill 负责业务判断。具体边界见 [模板与 Skill 职责](模板与Skill职责.md)。
 
-## v1.5.0 减少重复读取与唤醒
+## v2.0.0 人确认，AI 执行
+
+需求和 Bug 拆分后进入“待确认”。反馈人手动推进到“可研发”，AI 才能拆研发项。每个研发项的计划写在“研发计划”字段；你看过计划，手动从“待确认计划”推进到“可开始”，AI 才执行。AI 完成工作和自测后，等所有必要工作与验收环境就绪，再请反馈人验收；人的验收结果决定是否完成或返工。评论用于讨论和提醒，不代替这些手动确认。
+
+[完整 Mermaid 流程图与人、AI 的分工](skill/lark-dev-workflow/references/workflow.md)已随 Skill 一起安装。标题、计划、范围、验收说明和评论都必须写得具体、直接，让熟悉业务但不懂开发的人一眼看懂。AI 写前检查措辞，不把内部检查记录整段发给反馈人。
+
+新版模板在需求、Bug、研发项中使用流程字段。反馈分类、测试结果等仍使用单选。流程退回保留旧测试和确认依据；改变范围或计划才重新确认。一个研发项完成，不代表它关联的全部需求都已完成。
+
+**升级 Skill 与迁移表格是两件事。** 已有副本继续使用固定的旧结构说明和真实字段；旧单选有等价状态时仍可用。没有计划字段或确认状态时，明确说明受影响步骤，不用评论替代，也不自动改表。旧模板 1.2.0 的结构说明保存在 `template/versions/1.2.0/schema.json`。已核实且仍适用的历史确认继续保留。
+
+正式发布先固定源码提交、annotated tag、GitHub Release、完整 ZIP 和 SHA256SUMS，再按该版本的迁移步骤改线上。模板母版升级不会自动更新已有副本。Linux 的读写、绑定和运行状态必须核对后再恢复定时处理。
+
+## 历史版本：v1.5.0 减少重复读取与唤醒
 
 脚本继续完整检查项目，先把变化字段、相关评论线程和全部事项短索引整理给 AI；原文按需读取。长会话达到成功轮次上限后，先保存未完成事项、确认来源和停止约定，再考虑使用新会话；无完整交接或仍有在途操作时继续原会话。
 
@@ -75,7 +87,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v1.5.0/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v2.0.0/skill/lark-dev-workflow --agent codex -g
 ```
 
 Linux 已安装时，可重新执行上面的固定版本安装命令更新本 Skill。先保留项目配置和运行状态；手动安装或本地改过 Skill 的机器，先核对安装位置与差异，不覆盖个人修改。不要为了更新本技能运行会更新所有技能的命令。
@@ -89,7 +101,7 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 - 网页途径需要 Node.js 22+，复用本机已有、本人已登录的浏览器；配置步骤见 [网页接入说明](skill/lark-dev-workflow/references/browser-access.md)。不要求安装 Lark CLI，不因缺 profile 创建应用或 bot。
 - 已有可用 CLI 用户 profile 的机器可继续使用官方 [Lark CLI](https://github.com/larksuite/cli)，并提供相应的 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared` 技能；保持本人 user 身份。既有 CLI 验证使用 Lark CLI 1.0.94、Python 3.9.6，不代表新增网页途径已通过真实验证。
 
-`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v1.5.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v1.5.0/lark-dev-workflow-v1.5.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v2.0.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v2.0.0/lark-dev-workflow-v2.0.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 
@@ -123,7 +135,7 @@ CLI 途径的 `onboard.py` 只读发现资源，通过 `--contract` 接收独立
 
 ## 模板与升级
 
-本包模板规范为 `1.2.0`，绑定格式为 `2`；在线母版位置及发布信息见 `template/release.json`。旧格式 `1` 的项目配置继续可读，不要求迁移现有台账。
+本包新版模板规范为 `2.0.0`，旧 `1.2.0` 结构说明另行保留，绑定格式为 `2`；在线母版位置及发布信息见 `template/release.json`。旧格式 `1` 的项目配置继续可读，不要求迁移现有台账。
 
 GitHub Release 固定每次发布的 Skill、模板契约与完整包；在线模板提供可复制入口。Skill 版本见 `SKILL.md` 的 `metadata.version`；模板结构版本以 `template/schema.json` 的 `template_version` 为准，标题仅用于展示。Skill 与模板可分别升级，使用时核对所选 Release 的兼容说明；“07 版本”记录的是自己的业务项目版本。
 

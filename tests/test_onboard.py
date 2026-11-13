@@ -73,6 +73,29 @@ def select_project(contract, snapshot, record_id='recProjectFixture', title='Dem
 
 
 class BindingTests(unittest.TestCase):
+    def test_stage_contract_preserves_config_and_rejects_wrong_terminal_kind(self):
+        contract, snapshot = fixture()
+        spec = contract['tables']['work']['fields']['status']
+        spec.update(type='stage', options=[{'name': 'Open', 'type': 'Default'},
+                                          {'name': 'Done', 'type': 'EndDone'}])
+        field = snapshot['tables'][1]['fields'][1]
+        field.update(type='stage', options=copy.deepcopy(spec['options']), stage_config={
+            'property': {'convertMode': 'NextStage', 'options': copy.deepcopy(spec['options'])}})
+        config, report = check(contract, snapshot)
+        self.assertEqual(report['status'], 'ready')
+        mapped = config['tables']['work']['fields']['status']
+        self.assertEqual(mapped['stage_config'], field['stage_config'])
+        self.assertNotIn('write_options', mapped)
+        field['options'][1]['type'] = 'Default'
+        _, report = check(contract, snapshot)
+        self.assertEqual(report['status'], 'partial')
+        self.assertTrue(any('node kind differs' in e for e in report['errors']))
+        field['type'] = 'select'
+        field.pop('stage_config')
+        _, report = check(contract, snapshot)
+        self.assertEqual(report['status'], 'partial')
+        self.assertTrue(any('ordinary select' in e for e in report['errors']))
+
     def test_valid_copy_records_actual_field_and_relation_ids(self):
         contract, snapshot = fixture()
         config, report = check(contract, snapshot)

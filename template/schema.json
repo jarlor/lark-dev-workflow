@@ -1,6 +1,6 @@
 {
   "template_id": "lark-dev-workflow",
-  "template_version": "1.2.0",
+  "template_version": "2.0.0",
   "mapping_format_version": 2,
   "tables": {
     "feedback": {
@@ -328,48 +328,78 @@
         },
         "status": {
           "name": "状态",
-          "type": "select",
+          "type": "stage",
           "multiple": false,
           "options": [
             {
-              "name": "待补充"
+              "name": "待确认",
+              "type": "Default"
             },
             {
-              "name": "待确认"
+              "name": "可研发",
+              "type": "Default"
             },
             {
-              "name": "可研发"
+              "name": "研发中",
+              "type": "Default"
             },
             {
-              "name": "研发中"
+              "name": "待验收",
+              "type": "Default"
             },
             {
-              "name": "待验收"
+              "name": "已验收",
+              "type": "EndDone"
             },
             {
-              "name": "已验收"
-            },
-            {
-              "name": "已撤回"
-            },
-            {
-              "name": "暂停"
+              "name": "已撤回",
+              "type": "EndCancel"
             }
           ],
-          "description": "待补充：范围信息不足；待确认：具体修订未确认；可研发：确认且前置满足；研发中：实际执行；待验收：等待必要验收；已验收：适用验收点均满足；已撤回/暂停：保留决定与恢复条件。",
-          "default_value": [
-            "待确认"
-          ]
+          "stage_contract": {
+            "steps": [
+              {
+                "name": "待确认",
+                "actor": "human",
+                "person_field": "confirmer",
+                "required_fields": [
+                  "scope",
+                  "criteria"
+                ]
+              },
+              {
+                "name": "可研发",
+                "actor": "ai",
+                "person_field": null,
+                "required_fields": []
+              },
+              {
+                "name": "研发中",
+                "actor": "ai",
+                "person_field": null,
+                "required_fields": []
+              },
+              {
+                "name": "待验收",
+                "actor": "human",
+                "person_field": "acceptor",
+                "required_fields": []
+              }
+            ],
+            "done": "已验收",
+            "cancelled": "已撤回"
+          },
+          "description": "确认人手动完成待确认后才可拆研发项；AI 完成开发和自测、确认能验收后推进到待验收；验收人通过后完成流程。 暂停和受阻写处理情况；退回之前步骤会重置后续进度。"
         },
         "scope": {
           "name": "目标与范围",
           "type": "text",
-          "description": "说明目标、包含与不包含范围；长说明放详情文档稳定章节。 重大修改先保留旧修订的完整范围与 AC，再递增需求修订；未确认新修订不得沿用旧确认。"
+          "description": "写清要解决什么、包含哪些情况、哪些不做。内容实质变化时先保存旧版，再增加修订号并重新确认。"
         },
         "criteria": {
           "name": "验收标准",
           "type": "text",
-          "description": "可观察的验收点，标注适用修订；长内容链接稳定章节。 重大修改先保留旧修订的完整范围与 AC，再递增需求修订；未确认新修订不得沿用旧确认。"
+          "description": "写具体怎么操作、看到什么结果就算完成。标准实质变化时先保存旧版，再增加修订号并重新确认。"
         },
         "revision": {
           "name": "需求修订",
@@ -392,7 +422,7 @@
         "confirmation": {
           "name": "确认依据",
           "type": "text",
-          "description": "确认者真实身份、时间、原始人类指令、适用内容修订及来源链接。明确且唯一范围的用户执行指令可作为依据；Agent 代发、回执或演练不能制造人类确认。"
+          "description": "记录确认人手动将待确认推进到可研发的时间、适用范围版本和可查回的操作记录。评论中的同意不能代替手动推进。"
         },
         "details": {
           "name": "需求详情",
@@ -405,7 +435,7 @@
         "summary": {
           "name": "进展摘要",
           "type": "text",
-          "description": "已满足范围、未完成点及适用证据。"
+          "description": "简短写已完成什么、还差什么，并附需要查看的结果链接。"
         },
         "feedback": {
           "name": "来源反馈",
@@ -455,12 +485,47 @@
         "human_action": {
           "name": "需人介入",
           "type": "checkbox",
-          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+          "description": "额外需要人补充资料或作决定时勾选；下一步只写具体动作。确认和验收直接看流程，不再把整段催办文字写进字段。"
         },
         "next_step": {
           "name": "下一步",
           "type": "text",
           "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        },
+        "processing": {
+          "name": "处理情况",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "正常"
+            },
+            {
+              "name": "等待前置"
+            },
+            {
+              "name": "受阻"
+            },
+            {
+              "name": "暂停"
+            }
+          ],
+          "default_value": [
+            "正常"
+          ],
+          "description": "正常：可以继续。等待前置：关联的研发项尚未完成。受阻：缺环境、账号、资料等。暂停：已决定暂时不做。这里不代替确认，也不改变流程进度。"
+        },
+        "confirmer": {
+          "name": "确认人",
+          "type": "user",
+          "multiple": false,
+          "description": "负责确认这条需求或 Bug 拆分正确的人。使用真实人员，不用纯文本姓名代替。"
+        },
+        "acceptor": {
+          "name": "验收人",
+          "type": "user",
+          "multiple": false,
+          "description": "负责实际试用并确认结果的人。通常是相关反馈人；多人意见需按项目约定收齐。"
         }
       },
       "quick_view": [
@@ -468,9 +533,10 @@
         "title",
         "project",
         "status",
-        "summary",
-        "human_action",
-        "next_step"
+        "processing",
+        "confirmer",
+        "acceptor",
+        "summary"
       ],
       "quick_filter": {
         "logic": "and",
@@ -504,18 +570,17 @@
                 "status",
                 "intersects",
                 [
-                  "待补充",
                   "待确认",
                   "可研发",
                   "研发中",
-                  "暂停"
+                  "待验收"
                 ]
               ]
             ]
           }
         },
         {
-          "name": "需人介入",
+          "name": "待确认",
           "filter": {
             "logic": "and",
             "conditions": [
@@ -527,9 +592,11 @@
                 ]
               ],
               [
-                "human_action",
-                "==",
-                true
+                "status",
+                "intersects",
+                [
+                  "待确认"
+                ]
               ]
             ]
           }
@@ -552,6 +619,50 @@
                 [
                   "待验收"
                 ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "暂停或受阻",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "processing",
+                "intersects",
+                [
+                  "等待前置",
+                  "受阻",
+                  "暂停"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "需人介入",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "human_action",
+                "==",
+                true
               ]
             ]
           }
@@ -632,66 +743,93 @@
         },
         "status": {
           "name": "状态",
-          "type": "select",
+          "type": "stage",
           "multiple": false,
           "options": [
             {
-              "name": "待核实"
+              "name": "待确认",
+              "type": "Default"
             },
             {
-              "name": "待复现"
+              "name": "可研发",
+              "type": "Default"
             },
             {
-              "name": "待修复"
+              "name": "研发中",
+              "type": "Default"
             },
             {
-              "name": "修复中"
+              "name": "待验收",
+              "type": "Default"
             },
             {
-              "name": "待复测"
+              "name": "已验收",
+              "type": "EndDone"
             },
             {
-              "name": "已关闭"
-            },
-            {
-              "name": "阻塞"
-            },
-            {
-              "name": "暂停"
-            },
-            {
-              "name": "无需修复"
+              "name": "已撤回",
+              "type": "EndCancel"
             }
           ],
-          "description": "待核实：预期或异常尚不明确；待复现：缺适用复现；待修复：已复现；修复中：实际修复；待复测：已交付候选构建；已关闭：适用构建独立复测通过；阻塞：当前动作受阻；暂停：有暂停决定。 无需修复：非缺陷、重复、撤回或有权决定不修；处理摘要保留依据。重复必须关联唯一主 Bug。无法复现不等于无需修复。",
-          "default_value": [
-            "待核实"
-          ]
+          "stage_contract": {
+            "steps": [
+              {
+                "name": "待确认",
+                "actor": "human",
+                "person_field": "confirmer",
+                "required_fields": [
+                  "scope",
+                  "criteria"
+                ]
+              },
+              {
+                "name": "可研发",
+                "actor": "ai",
+                "person_field": null,
+                "required_fields": []
+              },
+              {
+                "name": "研发中",
+                "actor": "ai",
+                "person_field": null,
+                "required_fields": []
+              },
+              {
+                "name": "待验收",
+                "actor": "human",
+                "person_field": "acceptor",
+                "required_fields": []
+              }
+            ],
+            "done": "已验收",
+            "cancelled": "已撤回"
+          },
+          "description": "确认人手动完成待确认后才可拆研发项；AI 完成开发和自测、确认能验收后推进到待验收；验收人通过后完成流程。 暂停和受阻写处理情况；退回之前步骤会重置后续进度。"
         },
         "expected": {
           "name": "预期行为",
           "type": "text",
-          "description": "已有需求、契约或明确预期及依据；新能力走需求。"
+          "description": "本来应该出现什么结果，以及这个预期来自哪里。新增功能放需求表。"
         },
         "actual": {
           "name": "实际异常",
           "type": "text",
-          "description": "可观察的实际行为和影响。"
+          "description": "实际发生了什么、影响了谁或哪个场景。"
         },
         "conditions": {
           "name": "触发条件",
           "type": "text",
-          "description": "复现步骤、输入、必要账号/数据条件；不存凭据。"
+          "description": "按什么步骤、用什么输入能再次看到问题；所需账号或数据条件说清楚，不保存密码。"
         },
         "baseline": {
           "name": "复现基线",
           "type": "text",
-          "description": "复现适用的环境和完整构建或源码版本；未知明确未知。"
+          "description": "在哪个环境、哪个具体版本或代码提交上重现了问题；不知道的直接写尚未确认。"
         },
         "candidate_build": {
           "name": "候选构建",
           "type": "text",
-          "description": "交付修复的不可变构建或数据制品标识。"
+          "description": "本次修复对应的固定版本或代码提交，用于确认验收的是同一份结果。"
         },
         "details": {
           "name": "Bug详情",
@@ -704,7 +842,7 @@
         "summary": {
           "name": "处理摘要",
           "type": "text",
-          "description": "当前事实、复现/修复/复测结论及剩余范围。"
+          "description": "直接写问题是否重现、修到哪里、验证结果和还没解决的部分。"
         },
         "feedback": {
           "name": "来源反馈",
@@ -763,7 +901,7 @@
         "human_action": {
           "name": "需人介入",
           "type": "checkbox",
-          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+          "description": "额外需要人补充资料或作决定时勾选；下一步只写具体动作。确认和验收直接看流程，不再把整段催办文字写进字段。"
         },
         "next_step": {
           "name": "下一步",
@@ -776,6 +914,75 @@
           "target_role": "bugs",
           "bidirectional": false,
           "description": "重复报告指向同项目唯一主 Bug，保留原证据；不得自指或循环。无需修复的重复处置必须填写此关系。"
+        },
+        "processing": {
+          "name": "处理情况",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "正常"
+            },
+            {
+              "name": "等待前置"
+            },
+            {
+              "name": "受阻"
+            },
+            {
+              "name": "暂停"
+            }
+          ],
+          "default_value": [
+            "正常"
+          ],
+          "description": "正常：可以继续。等待前置：关联的研发项尚未完成。受阻：缺环境、账号、资料等。暂停：已决定暂时不做。这里不代替确认，也不改变流程进度。"
+        },
+        "confirmer": {
+          "name": "确认人",
+          "type": "user",
+          "multiple": false,
+          "description": "负责确认这条需求或 Bug 拆分正确的人。使用真实人员，不用纯文本姓名代替。"
+        },
+        "acceptor": {
+          "name": "验收人",
+          "type": "user",
+          "multiple": false,
+          "description": "负责实际试用并确认结果的人。通常是相关反馈人；多人意见需按项目约定收齐。"
+        },
+        "scope": {
+          "name": "修复范围",
+          "type": "text",
+          "description": "这次要修什么、哪些情况不包含在本次。先复现问题，再请反馈人确认拆分正确。"
+        },
+        "criteria": {
+          "name": "验收标准",
+          "type": "text",
+          "description": "反馈人怎样操作、看到什么结果就算修好。写具体场景，不只写测试通过。"
+        },
+        "revision": {
+          "name": "修复范围修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "description": "当前修复范围和验收标准的版本号。实质变化后增加版本并重新确认。",
+          "default_value": 1
+        },
+        "confirmed_revision": {
+          "name": "已确认修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "description": "人已确认的范围版本。没有确认时留空。"
+        },
+        "confirmation": {
+          "name": "确认依据",
+          "type": "text",
+          "description": "记录确认人手动将待确认推进到可研发的时间、适用修订和可查回的操作记录。复现证据另存，不能相互替代。"
         }
       },
       "quick_view": [
@@ -783,9 +990,10 @@
         "title",
         "project",
         "status",
-        "summary",
-        "human_action",
-        "next_step"
+        "processing",
+        "confirmer",
+        "acceptor",
+        "summary"
       ],
       "quick_filter": {
         "logic": "and",
@@ -819,11 +1027,77 @@
                 "status",
                 "intersects",
                 [
-                  "待核实",
-                  "待复现",
-                  "待修复",
-                  "修复中",
-                  "阻塞",
+                  "待确认",
+                  "可研发",
+                  "研发中",
+                  "待验收"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待确认",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待确认"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待验收",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待验收"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "暂停或受阻",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "processing",
+                "intersects",
+                [
+                  "等待前置",
+                  "受阻",
                   "暂停"
                 ]
               ]
@@ -851,28 +1125,6 @@
           }
         },
         {
-          "name": "待验收",
-          "filter": {
-            "logic": "and",
-            "conditions": [
-              [
-                "nature",
-                "intersects",
-                [
-                  "当前工作"
-                ]
-              ],
-              [
-                "status",
-                "intersects",
-                [
-                  "待复测"
-                ]
-              ]
-            ]
-          }
-        },
-        {
           "name": "已结束",
           "filter": {
             "logic": "and",
@@ -888,8 +1140,8 @@
                 "status",
                 "intersects",
                 [
-                  "已关闭",
-                  "无需修复"
+                  "已验收",
+                  "已撤回"
                 ]
               ]
             ]
@@ -948,41 +1200,62 @@
         },
         "status": {
           "name": "状态",
-          "type": "select",
+          "type": "stage",
           "multiple": false,
           "options": [
             {
-              "name": "待处理"
+              "name": "待确认计划",
+              "type": "Default"
             },
             {
-              "name": "进行中"
+              "name": "可开始",
+              "type": "Default"
             },
             {
-              "name": "等待前置"
+              "name": "进行中",
+              "type": "Default"
             },
             {
-              "name": "阻塞"
+              "name": "已交付",
+              "type": "EndDone"
             },
             {
-              "name": "已交付"
-            },
-            {
-              "name": "已完成"
-            },
-            {
-              "name": "暂停"
-            },
-            {
-              "name": "已转交"
-            },
-            {
-              "name": "已取消"
+              "name": "已取消",
+              "type": "EndCancel"
             }
           ],
-          "description": "待处理：尚未开始；进行中：实际执行；等待前置：有未完成依赖研发项；阻塞：环境/资料等阻止动作；已交付：已提供产物待核对；已完成：约定交付已核对；暂停/已转交：保留决定与承接。 已取消：有明确取消决定，保留依据、原范围、已完成成果与未完成点；不覆盖交付或失败事实。",
-          "default_value": [
-            "待处理"
-          ]
+          "stage_contract": {
+            "steps": [
+              {
+                "name": "待确认计划",
+                "actor": "human",
+                "person_field": "plan_confirmer",
+                "required_fields": [
+                  "plan",
+                  "scope",
+                  "deliverable",
+                  "verification_plan"
+                ]
+              },
+              {
+                "name": "可开始",
+                "actor": "ai",
+                "person_field": "owner",
+                "required_fields": []
+              },
+              {
+                "name": "进行中",
+                "actor": "ai",
+                "person_field": "owner",
+                "required_fields": [
+                  "summary"
+                ]
+              }
+            ],
+            "done": "已交付",
+            "cancelled": "已取消"
+          },
+          "description": "AI 写好计划后停在待确认计划；计划确认人手动推进到可开始，AI 才能执行。AI 完成工作、自测并填好交付与进展后，流程结束为已交付。 暂停和受阻写处理情况；退回之前步骤会重置后续进度。"
         },
         "owner": {
           "name": "负责人",
@@ -993,22 +1266,22 @@
         "scope": {
           "name": "工作范围",
           "type": "text",
-          "description": "冻结本项已授权范围：写 REQ编号/rN、适用 AC 和内容快照或不可覆盖的修订章节链接；不得只链接会变动的最新需求。需求重大变更先重新确认适用范围。"
+          "description": "写清本项实际做什么，关联哪个需求或 Bug、哪一版范围和验收标准。保存该版内容，不只链接随时会变的最新说明。"
         },
         "deliverable": {
           "name": "约定交付物",
           "type": "text",
-          "description": "明确本项交付物；提供产物不自动代表上游验收或发布。"
+          "description": "做完后交付什么，例如可试用的页面、修复版本或说明；交付不等于反馈人已验收。"
         },
         "verification_plan": {
           "name": "验证方式",
           "type": "text",
-          "description": "约定的交付核对及必要验证。"
+          "description": "说明要检查哪些场景、怎样操作、什么结果算通过。"
         },
         "summary": {
           "name": "交付与进展",
           "type": "text",
-          "description": "当前实际进展、产物与未完成范围；交接时保留原／新负责人真实身份、决定来源、已完成产物、剩余范围及在途动作边界，不覆盖既有历史。"
+          "description": "简短写已经做完什么、测试结果、在哪里查看，以及还差什么。"
         },
         "requirements": {
           "name": "关联需求",
@@ -1058,12 +1331,70 @@
         "human_action": {
           "name": "需人介入",
           "type": "checkbox",
-          "description": "仅在确需人提供决定、资料或授权时勾选；下一步写明谁做什么。普通调查不勾选。"
+          "description": "额外需要人补充资料或作决定时勾选；下一步只写具体动作。确认和验收直接看流程，不再把整段催办文字写进字段。"
         },
         "next_step": {
           "name": "下一步",
           "type": "text",
           "description": "当前一个可执行动作及承接者；需人介入时写具体请求。"
+        },
+        "processing": {
+          "name": "处理情况",
+          "type": "select",
+          "multiple": false,
+          "options": [
+            {
+              "name": "正常"
+            },
+            {
+              "name": "等待前置"
+            },
+            {
+              "name": "受阻"
+            },
+            {
+              "name": "暂停"
+            }
+          ],
+          "default_value": [
+            "正常"
+          ],
+          "description": "正常：可以继续。等待前置：关联的研发项尚未完成。受阻：缺环境、账号、资料等。暂停：已决定暂时不做。这里不代替确认，也不改变流程进度。"
+        },
+        "plan": {
+          "name": "研发计划",
+          "type": "text",
+          "description": "用简单的话写清准备改什么、分几步做、怎样自测、会有什么影响。完整计划放这里；评论只提醒人查看。"
+        },
+        "plan_confirmer": {
+          "name": "计划确认人",
+          "type": "user",
+          "multiple": false,
+          "description": "负责看计划并手动将流程从待确认计划推进到可开始的人。AI 不代点。"
+        },
+        "plan_revision": {
+          "name": "计划修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "description": "当前计划的版本号。实质改变范围、方案或影响时增加版本，并重新等人确认。",
+          "default_value": 1
+        },
+        "confirmed_plan_revision": {
+          "name": "已确认计划修订",
+          "type": "number",
+          "style": {
+            "type": "plain",
+            "precision": 0
+          },
+          "description": "人实际确认的计划版本。未确认留空，不能由 AI 创建计划时自动填入。"
+        },
+        "plan_confirmation": {
+          "name": "计划确认依据",
+          "type": "text",
+          "description": "保存谁在何时手动确认了哪一版计划，以及可查回的操作记录。评论中的同意不能代替手动推进。"
         }
       },
       "quick_view": [
@@ -1071,10 +1402,11 @@
         "title",
         "project",
         "status",
+        "processing",
+        "plan",
+        "plan_confirmer",
         "owner",
-        "summary",
-        "human_action",
-        "next_step"
+        "summary"
       ],
       "quick_filter": {
         "logic": "and",
@@ -1108,12 +1440,55 @@
                 "status",
                 "intersects",
                 [
-                  "待处理",
-                  "进行中",
+                  "待确认计划",
+                  "可开始",
+                  "进行中"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "待确认计划",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "status",
+                "intersects",
+                [
+                  "待确认计划"
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "name": "暂停或受阻",
+          "filter": {
+            "logic": "and",
+            "conditions": [
+              [
+                "nature",
+                "intersects",
+                [
+                  "当前工作"
+                ]
+              ],
+              [
+                "processing",
+                "intersects",
+                [
                   "等待前置",
-                  "阻塞",
-                  "暂停",
-                  "已转交"
+                  "受阻",
+                  "暂停"
                 ]
               ]
             ]
@@ -1140,28 +1515,6 @@
           }
         },
         {
-          "name": "待验收",
-          "filter": {
-            "logic": "and",
-            "conditions": [
-              [
-                "nature",
-                "intersects",
-                [
-                  "当前工作"
-                ]
-              ],
-              [
-                "status",
-                "intersects",
-                [
-                  "已交付"
-                ]
-              ]
-            ]
-          }
-        },
-        {
           "name": "已结束",
           "filter": {
             "logic": "and",
@@ -1177,7 +1530,7 @@
                 "status",
                 "intersects",
                 [
-                  "已完成",
+                  "已交付",
                   "已取消"
                 ]
               ]
@@ -2144,7 +2497,10 @@
       "requirements.confirmed_revision",
       "requirements.confirmation",
       "requirements.status",
-      "requirements.project"
+      "requirements.project",
+      "requirements.confirmer",
+      "requirements.acceptor",
+      "requirements.processing"
     ],
     "work_tracking": [
       "work.key",
@@ -2247,6 +2603,28 @@
       "feedback.project",
       "feedback.status",
       "feedback.summary"
+    ],
+    "bug_confirmation": [
+      "bugs.scope",
+      "bugs.criteria",
+      "bugs.revision",
+      "bugs.confirmed_revision",
+      "bugs.confirmation",
+      "bugs.confirmer",
+      "bugs.acceptor",
+      "bugs.processing",
+      "bugs.status",
+      "bugs.project"
+    ],
+    "work_plan_confirmation": [
+      "work.plan",
+      "work.plan_confirmer",
+      "work.plan_revision",
+      "work.confirmed_plan_revision",
+      "work.plan_confirmation",
+      "work.processing",
+      "work.status",
+      "work.owner"
     ]
   },
   "feedback_form": {
@@ -2267,7 +2645,7 @@
     "project_assignment": "必选原始反馈项目；选项以真实06编号区分同名项目；受理时解析为真实所属项目ID。待确认项目保持未归属并推进核实，不能默认当前项目。"
   },
   "relationship_policy": "native_bidirectional_pairs",
-  "description": "一个 Base 管理多个项目的空母版；提供表结构、原生关系、表单、视图、来源去重字段与真实负责人字段。评论判断、接手与交接规则由 Skill 执行；不提供原子占用锁、自动审批或后台调度。",
+  "description": "用流程字段显示需求、Bug 和研发项的进度。确认范围、确认计划、验收通过由人手动完成；AI 处理其他步骤。旧副本保持原结构，单独迁移后才能使用新流程。",
   "relation_pairs": [
     [
       "feedback.requirements",
@@ -2309,5 +2687,17 @@
       "delivery.verification",
       "verification.delivery"
     ]
-  ]
+  ],
+  "workflow_policy": {
+    "manual_gates": {
+      "requirements": "待确认 → 可研发；待验收 → 已验收",
+      "bugs": "待确认 → 可研发；待验收 → 已验收",
+      "work": "待确认计划 → 可开始"
+    },
+    "comments_are_not_gate_approval": true,
+    "migration_required_for_existing_copies": true,
+    "legacy_contract": "versions/1.2.0/schema.json",
+    "flow_reference": "../skill/lark-dev-workflow/references/workflow.md",
+    "deployment": "先发布固定版本，再用该版本单独迁移线上副本。安装 Skill 不会改表。"
+  }
 }

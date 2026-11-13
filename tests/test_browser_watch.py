@@ -9,6 +9,7 @@ import unittest
 SCRIPTS = Path(__file__).resolve().parents[1] / 'skill/lark-dev-workflow/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import browser_watch as browser
+import unattended
 import watch
 from test_watch import config, reply
 
@@ -49,6 +50,25 @@ def fixture():
     access = {'mode': 'browser', 'node_bin': '/fixture/node', 'cdp_url': 'http://127.0.0.1:9222',
               'user_id': 'browser-user-fixture'}
     return binding, access, payload
+
+
+def stage_field():
+    # Native Stage shape observed in an isolated Base; IDs and labels are synthetic.
+    return {'id': 'fldStage', 'name': '状态', 'type': 24, 'fieldUIType': 'Stage',
+            'defaultValueRule': {'type': 'stage_field'},
+            'property': {'convertMode': 'NextStage', 'defaultValue': 'FirstStage', 'options': [
+                {'id': 'optWait', 'name': '待确认计划', 'type': 'Default',
+                 'transitionRule': {'type': 'ConditionAndPerson', 'permissionFieldIds': ['fldOwner'],
+                                    'condition': {'conjunction': 'and', 'conditions': [
+                                        {'conditionId': 'requiredPlan', 'fieldId': 'fldPlan',
+                                         'fieldType': 1, 'operator': 'isNotEmpty', 'value': None}]}},
+                 'fieldsConfigInfo': [{'id': 'fldPlan'}]},
+                {'id': 'optReady', 'name': '可开始', 'type': 'Default',
+                 'transitionRule': {'type': 'Condition'}, 'fieldsConfigInfo': []},
+                {'id': 'optDone', 'name': '已交付', 'type': 'EndDone',
+                 'transitionRule': {'type': 'Condition'}, 'fieldsConfigInfo': []},
+                {'id': 'optCancel', 'name': '已取消', 'type': 'EndCancel',
+                 'transitionRule': {'type': 'Condition'}, 'fieldsConfigInfo': []}]}}
 
 
 class BrowserWatchTests(unittest.TestCase):
@@ -105,12 +125,91 @@ class BrowserWatchTests(unittest.TestCase):
             browser.cell_value({'value': 'deleted-option'}, schema)
         self.assertIsNone(browser.cell_value({'value': None}, schema))
 
+    def test_stage_current_done_and_cancel_keep_distinct_native_node_kinds(self):
+        schema = browser.field(stage_field())
+        self.assertEqual(schema['type'], 'stage')
+        self.assertEqual(browser.cell_value({'value': 'optWait'}, schema), ['待确认计划'])
+        self.assertEqual(browser.cell_value({'value': 'optReady'}, schema), ['可开始'])
+        self.assertEqual(browser.cell_value({'value': 'optDone'}, schema), ['已交付'])
+        self.assertEqual(browser.cell_value({'value': 'optCancel'}, schema), ['已取消'])
+        self.assertEqual([o['type'] for o in schema['options']],
+                         ['Default', 'Default', 'EndDone', 'EndCancel'])
+        for value in ('deletedNode', ['optWait', 'optDone'], {'stage': 'optReady'}):
+            with self.subTest(value=value), self.assertRaises(watch.WatchError):
+                browser.cell_value({'value': value}, schema)
+
+    def test_stage_duplicate_terminal_name_or_unknown_node_kind_fails(self):
+        for change in ('same-name', 'unknown-kind', 'no-ui-type', 'missing-rule'):
+            raw = stage_field()
+            options = raw['property']['options']
+            if change == 'same-name': options[2]['name'] = options[0]['name']
+            elif change == 'unknown-kind': options[3]['type'] = 'Unknown'
+            elif change == 'no-ui-type': raw.pop('fieldUIType')
+            else: options[0].pop('transitionRule')
+            with self.subTest(change=change), self.assertRaises(watch.WatchError):
+                browser.field(raw)
+
+    def test_stage_configuration_changes_survive_snapshot_and_need_explicit_type_binding(self):
+        binding, access, payload = fixture()
+        raw = stage_field()
+        binding['tables']['work']['fields']['status'] = {
+            'id': raw['id'], 'type': 'select', 'name': raw['name']}
+        table = payload['tables']['tblWork']
+        table['fields'].append(raw)
+        table['rows'][0]['cells'][raw['id']] = {'value': 'optWait'}
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'comments.json'
+            with self.assertRaisesRegex(watch.WatchError, 'type changed'):
+                watch.collect_with_reader(binding, browser.Reader(binding, access, payload), comments_state_path=path)
+            binding['tables']['work']['fields']['status']['type'] = 'stage'
+            first = watch.collect_with_reader(binding, browser.Reader(binding, access, payload), comments_state_path=path)
+            raw['property']['options'][0]['transitionRule']['permissionFieldIds'] = ['fldOtherOwner']
+            second = watch.collect_with_reader(binding, browser.Reader(binding, access, payload), comments_state_path=path)
+        self.assertEqual(first['records'], second['records'])
+        self.assertNotEqual(first['stage_fields'], second['stage_fields'])
+        self.assertEqual(first['records']['tblWork/recWork']['fields']['fldStage'], ['待确认计划'])
+        first_id = unattended.digest(unattended.stable_snapshot(first))
+        second_id = unattended.digest(unattended.stable_snapshot(second))
+        state = {'checkpoint': first_id, 'last_result': {'run_id': 'verified-run', 'snapshot_id': first_id}}
+        self.assertEqual(unattended.should_run(state, second_id, 1, 86400), (True, 'changed'))
+        with tempfile.TemporaryDirectory() as directory:
+            effects = Path(directory) / 'runs/verified-run/effects.json'
+            effects.parent.mkdir(parents=True)
+            effects.write_text(json.dumps({'format_version': 1, 'run_id': 'verified-run',
+                'snapshot_id': first_id, 'record_fields': [], 'comments': []}))
+            self.assertFalse(unattended.matches_own_effects(directory, state, first, second_id))
+
+    def test_plain_select_data_cannot_verify_a_stage_binding(self):
+        binding, access, payload = fixture()
+        binding['tables']['work']['fields']['status'] = {'id': 'fldStage', 'type': 'stage'}
+        table = payload['tables']['tblWork']
+        table['fields'].append({'id': 'fldStage', 'type': 3, 'property': {
+            'options': [{'id': 'optReady', 'name': '可开始'}]}})
+        table['rows'][0]['cells']['fldStage'] = {'value': 'optReady'}
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(watch.WatchError, '普通单选'):
+                watch.collect_with_reader(binding, browser.Reader(binding, access, payload),
+                                          comments_state_path=Path(directory)/'comments.json')
+
     def test_project_link_target_change_is_rejected(self):
         binding, access, payload = fixture()
         payload['tables']['tblWork']['fields'][1]['property']['tableId'] = 'tblElsewhere'
         reader = browser.Reader(binding, access, payload)
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaisesRegex(watch.WatchError, 'project link'):
+                watch.collect_with_reader(binding, reader, comments_state_path=Path(directory)/'comments.json')
+
+    def test_any_mapped_link_target_drift_is_rejected(self):
+        binding, access, payload = fixture()
+        binding['tables']['work']['fields']['requirement'] = {
+            'id': 'fldRequirement', 'type': 'link', 'target_table_id': 'tblRequirements'}
+        table = payload['tables']['tblWork']
+        table['fields'].append({'id': 'fldRequirement', 'type': 18,
+                                'property': {'tableId': 'tblBugs'}})
+        table['rows'][0]['cells']['fldRequirement'] = {'value': []}
+        reader = browser.Reader(binding, access, payload)
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(watch.WatchError, 'link target'):
                 watch.collect_with_reader(binding, reader, comments_state_path=Path(directory)/'comments.json')
 
     def test_rich_text_keeps_changed_link_target_and_person_ids(self):
