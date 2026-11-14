@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.0.1",
+    "skill_version": "2.1.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -79,7 +79,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 303,
+  "automated_tests_passed": 326,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -89,10 +89,10 @@
     "two_real_accounts_concurrent_claim_and_handoff",
     "windows_live_runtime"
   ],
-  "source_display_name": "Agent研发工作流｜v1.2.0",
+  "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.0.1",
-  "documentation_updated_on": "2026-11-14",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.1.0",
+  "documentation_updated_on": "2026-11-15",
   "validation_history": {
     "1.1.0": {
       "independent_checks_passed": 15,
@@ -306,42 +306,69 @@
       ],
       "target_linux_installed": false,
       "installation_note": "Validation used an isolated candidate directory. Deployment and installation are checked separately after release."
+    },
+    "2.0.1": {
+      "version": "2.0.1",
+      "date": "2026-11-14",
+      "tests": 303,
+      "environments": [
+        "Python 3.9.6 and Node.js 22.23.2 local",
+        "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
+      ],
+      "scope": [
+        "optional_stage_configuration_preserved_in_own_write_prediction",
+        "human_stage_transition_or_configuration_change_prevents_suppression",
+        "receipt_cannot_modify_stage_configuration",
+        "legacy_snapshots_remain_compatible_unknown_keys_remain_rejected",
+        "read_only_replay_of_saved_stage_snapshot",
+        "template_2_0_0_schema_preserved_byte_for_byte"
+      ],
+      "not_validated": [
+        "guaranteed_token_or_billing_reduction",
+        "live_receipt_then_next_cron_suppression_after_patch_at_packaging",
+        "notification_delivery_to_same_logged_in_user",
+        "multiple_real_users_permission_separation"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "Patch checked in an isolated directory; installation and live runtime are verified after release."
     }
   },
   "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "2.0.1",
+  "release_version": "2.1.0",
   "skill_release_validation": {
-    "version": "2.0.1",
-    "date": "2026-11-14",
-    "tests": 303,
+    "version": "2.1.0",
+    "date": "2026-11-15",
+    "tests": 326,
     "environments": [
       "Python 3.9.6 and Node.js 22.23.2 local",
       "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
     ],
     "scope": [
-      "optional_stage_configuration_preserved_in_own_write_prediction",
-      "human_stage_transition_or_configuration_change_prevents_suppression",
-      "receipt_cannot_modify_stage_configuration",
-      "legacy_snapshots_remain_compatible_unknown_keys_remain_rejected",
-      "read_only_replay_of_saved_stage_snapshot",
-      "template_2_0_0_schema_preserved_byte_for_byte"
+      "existing_native_8_table_schema_compatible_without_migration",
+      "ready_target_repository_combination_and_current_health_read_back",
+      "offline_deployment_evidence_checks_and_changed_test_window_detection",
+      "unexecuted_human_test_plans_use_existing_fields",
+      "template_2_0_0_contract_and_existing_binding_unchanged",
+      "twelve_independent_synthetic_behavior_cases",
+      "real_saved_status_and_health_observation_read_only_replay",
+      "mermaid_flowchart_and_documentation_json_examples_verified"
     ],
     "not_validated": [
-      "guaranteed_token_or_billing_reduction",
-      "live_receipt_then_next_cron_suppression_after_patch_at_packaging",
-      "notification_delivery_to_same_logged_in_user",
-      "multiple_real_users_permission_separation"
+      "feedback_person_device_access_and_human_acceptance",
+      "complete_real_product_cycle_after_this_skill_upgrade",
+      "production_release"
     ],
     "target_linux_installed": false,
-    "installation_note": "Patch checked in an isolated directory; installation and live runtime are verified after release."
+    "installation_note": "Candidate checks do not prove installation. Install and project-rule adoption are verified after release.",
+    "independent_behavior_cases": 12
   },
   "source_at_packaging": {
-    "template_version": "1.2.0",
-    "display_name": "Agent研发工作流｜v1.2.0",
-    "observed_on": "2026-11-14",
-    "editing_access_verified": true,
-    "deployment": "migration_in_progress_after_v2_0_0_release",
-    "note": "Original owner editing verified. Stage fields are saved, while views and document updates are still being checked. The previous complete template version was 1.2.0; package and source deployment versions are separate."
+    "template_version": "2.0.0",
+    "display_name": "Agent研发工作流｜v2.0.0",
+    "observed_on": "2026-11-15",
+    "editing_access_verified": false,
+    "deployment": "document_update_pending_owner_login_after_release",
+    "note": "Template structure remains 2.0.0. Current browser identity cannot access the original document bodies; the owner login is needed for the separate documentation update. Existing project copies are independent."
   },
   "target_source_display_name": "Agent研发工作流｜v2.0.0"
 }
