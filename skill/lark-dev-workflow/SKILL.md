@@ -1,6 +1,6 @@
 ---
 name: lark-dev-workflow
-description: "用飞书多维表格处理项目反馈、需求、Bug、验收和交接，支持模板副本接入与 Linux Codex CLI 定时运行。通过项目配置适配已有表格；不用于普通代码修改、账号权限管理或跨机器派工。"
+description: "用飞书多维表格处理项目反馈、需求、Bug、验收和交接。支持模板副本接入，以及在 Linux 上由飞书事件或定时任务唤醒 Codex CLI。通过项目配置适配已有表格。"
 metadata:
   version: "2.1.0"
 ---
@@ -26,8 +26,9 @@ metadata:
 | 处理评论中的补充、决定或追问 | [评论处理](references/comments.md)：读取完整线程、核实项目与已有处理；涉及业务状态时同时应用业务流程 |
 | 接手或转交工作 | [多人接手](references/collaboration.md)：核对负责人、分配依据和未结束的操作 |
 | 用本人已登录的飞书网页接入 | [本人网页接入](references/browser-access.md)：复用本机浏览器，核实账号和已有 Base；不因缺少 CLI profile 自动创建应用 |
-| 为 Linux Codex CLI 配置定时运行 | [Linux 定时运行](references/unattended.md)：用户要求安装或启用时才操作目标 Linux 的 crontab；只要方案或步骤时不安装 |
-| 已由 Linux 定时脚本启动，正在执行一轮工作 | [本轮工作规则](references/unattended-worker.md)：处理当前项目并返回结果，不重新安装调度 |
+| 让飞书记录或评论唤醒 Linux 上的 Codex | 按[独立助手接入](references/assistant-identity.md)绑定账号，从同版完整包安装长连接服务。收通知和定时补查由这个服务统一负责 |
+| 使用原来的 Linux 定时任务 | [使用 crontab](references/unattended.md)。仅在项目选择这种方式时安装 |
+| 已由 Linux 启动一轮工作 | 按[本轮工作规则](references/unattended-worker.md)处理事项、返回结果，沿用当前调度方式 |
 
 ## 每次工作的共用规则
 
@@ -72,6 +73,6 @@ CLI 操作复用 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared`；本
 | `watch.py`、`browser_watch.py` | 分别接入 CLI 与本人网页读取，共用项目范围、完整性和观察记录检查；不执行正式业务写入 |
 | `unattended.sh` | Linux 配置与运行入口；`scan` 只读，`tick` 会启动 Codex 处理真实工作，`install-cron` 才安装定时任务 |
 
-Linux 定时入口只使用目标机器的 crontab，不创建 Codex App 调度。启用定时运行不额外授予部署、付费、改权限或项目外通知权限；已有相应授权继续有效。
+每个项目在 Linux 上只保留一个调度入口。选用长连接时，先在测试副本验证，再按完整包的切换步骤交接原任务。启用服务或定时任务均沿用原有业务授权。
 
 报告说清实际做了什么、结果适用于哪里、还有什么没完成，以及是否需要人做具体动作。一次检查成功不代表持续运行已启用，一轮任务结束也不代表整个项目已交付。

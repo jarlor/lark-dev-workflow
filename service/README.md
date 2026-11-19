@@ -120,7 +120,14 @@ python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/brid
 
 测试执行器要有自己的工作区、状态目录和项目配置。绑定 `cli_actor`（identity=bot、专用 profile、app_id、open_id）；`unattended.sh init --access bot --lark-profile …` 生成版本 3 的执行器配置。先测试扫描读全项目，再写一条测试计划并确认机器人署名、@ 到人和原生节点操作。不要用个人网页登录补做机器人被拒绝的操作。私信只在明确授权且收件人可核实的项目启用。
 
-一条反馈拆成一条需求、这条需求只需一个研发项时，Codex 可以根据已确认的范围和验收标准写计划。它填写研发计划、工作范围、约定交付物和验证方式。宿主固定项目、需求、修订号和计划确认人。已获该项目写入授权时，使用 `service/prepare_plan.py` 核对范围确认，并保存、读回研发项。取得 `prepared` 结果后，将返回的记录编号和计划修订交给 `service/plan_notice.py`。提醒发在这条研发项下，写清要看哪一栏、认可时点哪个节点。发出后保留原评论，等指定的人操作。
+一条反馈拆成一条需求、这条需求只需一个研发项时，Codex 可以按已确认的范围和验收标准写计划。已获项目写入授权的执行器用 `service/plan_action.py` 完成写计划和发提醒。运行前从本地项目配置和该事项核对服务配置、需求记录编号、需求修订号和计划确认人。这四个参数由执行端指定。Codex 在标准输入提供 JSON，填写 `plan`（研发计划）、`scope`（工作范围）、`deliverable`（交付物）和 `verification_plan`（验证方法）。
+
+```sh
+python3 service/plan_action.py --config "$bridge_config" --requirement "$requirement_id" \
+  --revision "$requirement_revision" --confirmer "$plan_confirmer_open_id" < plan.json
+```
+
+未核实本人确认时返回 `waiting`。只有 `notice=notified` 才表示已在这条研发项下读回给指定人员的提醒。中断后用相同参数加 `--reconcile`，省去 `< plan.json`。它查回原研发项和已有提醒，缺少可靠依据时保留待核实的结果。
 
 将测试服务切为 `dispatch`，保留上述固定身份，增加：
 

@@ -87,9 +87,13 @@ Linux 的配置、试跑、安装、暂停及移除方法见 [定时运行说明
 
 ## 安装
 
-安装当前版本：
+### Linux 飞书长连接
 
-安装到 Codex 的全局 Skill 目录：
+在运行 Codex CLI 的服务器上，使用包含 `service/` 和 `skill/` 两个同级目录的完整包。先用对应 Release 的 `SHA256SUMS` 校验 ZIP，再从解压后的根目录打开[服务安装与切换说明](service/README.md)。`npx skills add` 只安装下面的 Skill。已发布的 v2.1.0 包含原来的 crontab 方式，长连接服务仍在测试。
+
+### 安装 Skill
+
+运行下面的命令，把 Skill 安装到 Codex 的全局目录。
 
 ```bash
 npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex -g
