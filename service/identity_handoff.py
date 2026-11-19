@@ -40,9 +40,23 @@ def load_pair(source, candidate):
     return old, new
 
 
+def require_full_scan(snapshot, binding, *, browser=False):
+    expected = runtime.watch.scan_coverage(binding)
+    if browser:
+        # These are the completeness checks recorded by browser_watch.collect.
+        expected.update(access='personal_browser', comments='current_accessible_sdk_index_and_loaded_replies',
+                        consistency='two_complete_passes_equal')
+    require(isinstance(snapshot, dict) and type(snapshot.get('format_version')) is int
+            and snapshot['format_version'] == 1 and snapshot.get('binding') == runtime.comments.binding_identity(binding)
+            and 'native_stage_inspection' not in snapshot and snapshot.get('coverage') == expected,
+            'Scan does not verify the configured identity, reader and full project scope.')
+
+
 def preview(old, new, reviewed_at):
     source_dir, target_dir = (Path(config['state_dir']) for config in (old, new))
-    require(not any(os.path.lexists(target_dir / name) for name in ('runs', 'checkpoint-snapshot.json')),
+    require(not any(os.path.lexists(target_dir / name) for name in (
+        'runs', 'checkpoint-snapshot.json', 'native-stage-prepare/runs', 'native-stage-prepare/state.json',
+        'native-stage-prepare/checkpoint-snapshot.json')),
             'Candidate must be unscheduled and never have run a worker.')
     source_binding, target_binding = (runtime.read_json(config['project_config']) for config in (old, new))
     actor = runtime.control.actor_for_runner(new, target_binding)
@@ -69,12 +83,12 @@ def preview(old, new, reviewed_at):
         require(not note['active_operations'], 'Original handoff still lists unfinished external operations.')
     previous = runtime.run_context.checkpoint_snapshot(source_dir, state)
     require(previous is not None, 'Original checkpoint cannot be verified.')
+    require_full_scan(previous, source_binding, browser=old['format_version'] == 2)
+    require('native_stage_mode' not in new, 'Preparation-only runners cannot take over the full workflow.')
     scan_file = target_dir / 'last-scan.json'
     require(0 <= reviewed_at - scan_file.stat().st_mtime <= 1800, 'Run a fresh candidate scan (within 30 minutes).')
     current = runtime.read_json(scan_file)
-    require(current.get('binding') == runtime.comments.binding_identity(target_binding)
-            and current.get('coverage') == previous.get('coverage') == runtime.watch.scan_coverage(target_binding),
-            'Candidate scan does not identify the bound assistant and full configured project scope.')
+    require_full_scan(current, target_binding)
     journal = runtime.comments.load_state(target_dir / 'comments-state.json', target_binding)
     require(journal.get('last_full_reconciliation'), 'No completed full comment scan under the new identity.')
     for field in ('records', 'comments'):

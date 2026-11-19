@@ -1,11 +1,15 @@
 import copy
+import functools
+import json
 from pathlib import Path
+import subprocess
 import sys
 import unittest
 from unittest import mock
 
 from test_unattended import RuntimeFixture, write_json
 from test_bot_identity import ACTOR
+from test_browser_watch import browser, fixture as browser_fixture
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'service'))
@@ -52,6 +56,77 @@ class Handoff(RuntimeFixture):
         self.assertIsNone(state['checkpoint'])
         self.assertEqual(state['actor_handoff']['previous_state_dir'], str(self.old_dir))
         self.assertFalse((self.bot_dir / 'checkpoint-snapshot.json').exists())
+
+    def test_completed_browser_checkpoint_to_strict_assistant_scan(self):
+        binding, access, web_payload = browser_fixture()
+        access['node_bin'] = sys.executable
+        browser_config = dict(self.config, format_version=2, access=access, state_dir=str(self.root / 'browser-state'))
+        browser_config.pop('lark_profile')
+        browser_config.pop('lark_bin')
+        write_json(self.config_path, browser_config)
+        write_json(self.project_path, binding)
+        target_binding = dict(binding, cli_actor=ACTOR)
+        write_json(self.root / 'bot-binding.json', target_binding)
+        response = subprocess.CompletedProcess([], 0, json.dumps(web_payload), '')
+        collect = functools.partial(browser.collect, runner=mock.Mock(return_value=response))
+        with mock.patch.object(browser, 'collect', collect):
+            self.assertEqual(runtime.tick(self.config_path, executor=self.execute)['status'], 'ran')
+        source_dir = Path(browser_config['state_dir'])
+        state = runtime.read_json(source_dir / 'state.json')
+        last = state['last_result']
+        write_json(source_dir / 'runs' / last['run_id'] / 'result.json', last)
+        observed = runtime.run_context.checkpoint_snapshot(source_dir, state)
+        self.assertTrue(observed['comments'])
+        target = dict(observed, coverage=runtime.watch.scan_coverage(target_binding),
+                      binding=runtime.comments.binding_identity(target_binding))
+        write_json(self.bot_dir / 'last-scan.json', target)
+        journal = runtime.comments.empty_state(target_binding)
+        write_json(self.bot_dir / 'comments-state.json', journal)
+        with self.assertRaisesRegex(ValueError, 'full comment scan'):
+            self.review()
+        write_json(self.bot_dir / 'comments-state.json', dict(journal, last_full_reconciliation='new-scan'))
+        self.assertTrue(self.review())
+        write_json(self.bot_dir / 'last-scan.json', dict(target, comments={}))
+        with self.assertRaisesRegex(ValueError, 'comments are missing'):
+            self.review()
+
+        for key in ('access', 'comments', 'consistency'):
+            for missing in (True, False):
+                with self.subTest(key=key, missing=missing):
+                    coverage = dict(observed['coverage'])
+                    if missing:
+                        del coverage[key]
+                    else:
+                        coverage[key] = 'unknown'
+                    with self.assertRaisesRegex(ValueError, 'scope'):
+                        transfer.require_full_scan(dict(observed, coverage=coverage), binding, browser=True)
+
+    def test_partial_unknown_or_mismatched_assistant_scan_rejected(self):
+        coverage = self.bot_snapshot['coverage']
+        for updates in ({'format_version': 2}, {'binding': self.snapshot['binding']},
+                        {'coverage': dict(coverage, access='personal_browser')},
+                        {'coverage': dict(coverage, feedback={'mode': 'linked_only'})},
+                        {'coverage': dict(coverage, execution_scope='preparation')},
+                        {'coverage': dict(coverage, native_stage_inspection={'dispatch_verified': False})},
+                        {'native_stage_inspection': {}}):
+            with self.subTest(updates=updates):
+                write_json(self.bot_dir / 'last-scan.json', dict(self.bot_snapshot, **updates))
+                with self.assertRaisesRegex(ValueError, 'scope'):
+                    self.review()
+        write_json(self.bot_dir / 'last-scan.json', self.bot_snapshot)
+        config = runtime.read_json(self.bot_config)
+        write_json(self.bot_config, dict(config, native_stage_mode='prepare', event_tenant_key='tenant'))
+        with self.assertRaisesRegex(ValueError, 'Preparation'):
+            self.review()
+
+    def test_switching_a_used_prepare_runner_to_strict_does_not_make_it_unused(self):
+        nested = self.bot_dir / 'native-stage-prepare'
+        nested.mkdir()
+        write_json(nested / 'last-scan.json', {'coverage': 'inspection'})
+        self.assertTrue(self.review())  # An earlier read-only check is compatible with a later full scan.
+        write_json(nested / 'state.json', {'inflight': {'run_id': 'unfinished'}})
+        with self.assertRaisesRegex(ValueError, 'never have run'):
+            self.review()
 
     def review(self):
         return transfer.handoff(self.config_path, self.bot_config)['review_sha256']
