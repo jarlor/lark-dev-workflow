@@ -86,6 +86,34 @@ python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/brid
 
 `verified` 表示这条记录的这一版已由指定人员账号完成该步。工具只核对本行字段。范围或计划引用外部说明时，须另查当时和现在的文档版本。安排开发前仍需查上游范围、Bug 复现、项目约定和依赖。如果原事项已经保存了同一版本的可靠确认依据，可以继续使用。接收器保留新事件的时间有限，记录过期不会撤销已有确认，也不用请人再点一次。
 
+### 核对 AI 更新节点的规则
+
+服务器可用专用助手读回飞书里已保存的新版工作流。先运行 `python3 service/workflow_rule.py --config /etc/lark-dev-workflow/demo/bridge.json --show-binding`，将输出的 `service` 和 `runner` 保存在该服务状态目录的 `ai-node-rules.json`，权限设为 0600。在同一文件的 `rules` 中按名称登记要检查的规则。下面的编号仅示意格式，安装时使用本副本的真实编号。
+
+```json
+{
+  "service": "本服务的指纹",
+  "runner": "本执行器的指纹",
+  "rules": {
+    "项目条件": {
+      "purpose": "project_scope", "workflow_id": "wkfExample", "role": "requirements", "table_id": "tblReq",
+      "guard": {"kind": "project_link", "field_id": "fldProject", "value": "recProject"}
+    },
+    "AI节点": {
+      "workflow_id": "wkfUpdate", "role": "diagnostic", "table_id": "tblExample",
+      "stage_field_id": "fldStage", "marker_field_id": "fldMarker",
+      "source": {"id": "optFirst", "name": "AI 核验"}, "target": {"id": "optNext", "name": "人工确认"},
+      "guard": {"kind": "text", "field_id": "fldTitle", "value": "仅核对配置"},
+      "required_field_ids": ["fldEvidence"], "owner_field_id": null
+    }
+  }
+}
+```
+
+运行 `python3 service/workflow_rule.py --config /etc/lark-dev-workflow/demo/bridge.json --rule 项目条件`。专查项目条件时，工具核对关联字段指向的项目表，再读回指定项目行。即使规则后面只是“查找记录”，也能单独验证这项触发条件。
+
+检查更新规则时，`enabled` 显示飞书里的启停状态，`updates_trigger_row_only` 表示唯一动作只更新触发行的状态。若已有固定定义，可把上次核实的 `definition_sha256` 填入该项，后续步骤变化就会报告不匹配。正式项目按表使用 `requirements`、`bugs` 或 `work`，同时核对原绑定中的 AI 节点、下一步和必填条件。独立技术表用 `diagnostic`。普通文字匹配不能证明只影响一个项目。负责人仅设为“非空”时，`fixed_bot_owner_verified` 为 false。工具只报告规则配置，不写触发标记，也不判断业务是否可派工。
+
 ## 启动同一个执行器
 
 测试执行器要有自己的工作区、状态目录和项目配置。绑定 `cli_actor`（identity=bot、专用 profile、app_id、open_id）；`unattended.sh init --access bot --lark-profile …` 生成版本 3 的执行器配置。先测试扫描读全项目，再写一条测试计划并确认机器人署名、@ 到人和原生节点操作。不要用个人网页登录补做机器人被拒绝的操作。私信只在明确授权且收件人可核实的项目启用。
