@@ -85,9 +85,14 @@ def checked_rule(rule):
         'owner_field_id',
     }
     need(
-        set(rule) - {'definition_sha256'} == keys and rule['role'] in (*ROLES, 'diagnostic'),
+        set(rule) - {'definition_sha256', 'owner_match'} == keys and rule['role'] in (*ROLES, 'diagnostic'),
         '登记的规则不完整。',
     )
+    if 'owner_match' in rule:
+        need(
+            rule['owner_match'] == 'bound_assistant' and rule['owner_field_id'] is not None,
+            '精确核对助手时，须登记负责人的字段编号。',
+        )
     need(
         re.fullmatch(r'wkf[A-Za-z0-9]+', rule['workflow_id'])
         and re.fullmatch(r'tbl[A-Za-z0-9]+', rule['table_id']),
@@ -142,7 +147,25 @@ def fingerprint(workflow):
     ).hexdigest()
 
 
-def check_graph(workflow, rule, table_name, names):
+def assistant_condition(conditions, field_name, bot_open_id):
+    matches = [c for c in conditions if isinstance(c, dict) and c.get('field_name') == field_name]
+    need(len(matches) == 1, '须有一个条件指定本行的助手负责人。')
+    values = matches[0].get('value')
+    need(isinstance(values, list) and len(values) == 1, '负责人条件须精确指定一位助手。')
+    person = values[0].get('value') if isinstance(values[0], dict) else None
+    need(
+        isinstance(bot_open_id, str) and re.fullmatch(r'ou_[A-Za-z0-9]+', bot_open_id)
+        and isinstance(person, dict) and person.get('id') == bot_open_id,
+        '负责人的 open_id 与绑定的助手不符。',
+    )
+    expected_person = {'id': bot_open_id}
+    if 'name' in person:
+        need(bridge.nonempty(person['name']), '负责人显示名无效。')
+        expected_person['name'] = person['name']
+    return condition(field_name, 'is', [dict(value_type='user', value=expected_person)])
+
+
+def check_graph(workflow, rule, table_name, names, *, bot_open_id=None):
     """Reject additional branches, writes, dynamic field values, filters, and unknown execution settings."""
     checked_rule(rule)
     need(
@@ -191,10 +214,7 @@ def check_graph(workflow, rule, table_name, names):
         condition(names[guard['field_id']], 'is', [dict(value_type='text', value=guard['value'])]),
         condition(stage, 'is', [dict(value_type='option', value=rule['source'])]),
     ]
-    nonempty_fields = list(rule['required_field_ids'])
-    if rule['owner_field_id']:
-        nonempty_fields.append(rule['owner_field_id'])
-    expected.extend(condition(names[fid], 'isNotEmpty', []) for fid in nonempty_fields)
+    expected.extend(condition(names[fid], 'isNotEmpty', []) for fid in rule['required_field_ids'])
     filters = td['record_watch_info']
     need(
         set(filters) == {'conjunction', 'conditions'}
@@ -202,6 +222,12 @@ def check_graph(workflow, rule, table_name, names):
         and isinstance(filters['conditions'], list),
         '所有条件必须同时满足。',
     )
+    if rule['owner_field_id']:
+        owner = names[rule['owner_field_id']]
+        if rule.get('owner_match') == 'bound_assistant':
+            expected.append(assistant_condition(filters['conditions'], owner, bot_open_id))
+        else:
+            expected.append(condition(owner, 'isNotEmpty', []))
     key = lambda item: json.dumps(item, sort_keys=True)
     need(
         sorted(map(key, filters['conditions'])) == sorted(map(key, expected)),
@@ -410,9 +436,19 @@ def verify(config_path, rule_name, *, reader_factory=watch.Cli):
             )
             if rule['guard']['kind'] == 'text':
                 need(by_id[rule['guard']['field_id']].get('type') == 'text', '登记的文字范围字段类型已变化。')
-            if rule['owner_field_id']:
-                need(by_id[rule['owner_field_id']].get('type') == 'user', '负责人条件未使用实际人员字段。')
-            check_graph(definition, rule, table_name, names)
+            owner = rule['owner_field_id']
+            owner_match = rule.get('owner_match', 'nonempty_only' if owner else 'none')
+            if owner:
+                need(by_id[owner].get('type') == 'user', '负责人条件未使用实际人员字段。')
+                if owner_match == 'bound_assistant':
+                    native_owner = raw[owner]
+                    need(
+                        by_id[owner].get('multiple') is False and native_owner.get('type') == 11
+                        and native_owner.get('ui_type', 'User') == 'User'
+                        and (native_owner.get('property') or {}).get('multiple', False) is False,
+                        '负责人须为只允许选一人的人员字段。',
+                    )
+            check_graph(definition, rule, table_name, names, bot_open_id=actor['open_id'])
             digest = fingerprint(definition)
             result['definition_sha256'] = digest
             if 'definition_sha256' in rule:
@@ -447,7 +483,8 @@ def verify(config_path, rule_name, *, reader_factory=watch.Cli):
             source=rule['source'],
             target=rule['target'],
             required_nonempty_field_ids=rule['required_field_ids'],
-            owner_condition='nonempty_only' if rule['owner_field_id'] else 'none',
+            owner_condition=owner_match,
+            fixed_bot_owner_verified=owner_match == 'bound_assistant',
             definition_pinned='definition_sha256' in rule,
         )
     except Unverified as exc:

@@ -260,6 +260,100 @@ class WorkflowRuleTests(RuntimeFixture):
         self.reader.read_record.return_value = {'record_id': 'recProject', 'values': {'fldNumber': 'PRJ-0001'}}
         self.pin()
 
+    def set_assistant_owner(self):
+        self.contract['steps'][1]['person_field'] = 'person'
+        self.mapped['person']['multiple'] = False
+        self.raw.append(dict(field_id='fldOwner', type=11, ui_type='User', property={'multiple': False}))
+        self.rule.update(owner_field_id='fldOwner', owner_match='bound_assistant')
+        owner_filter = module.condition('负责人', 'is', [
+            dict(value_type='user', value=dict(id=self.actor['open_id'], name='示例助手')),
+        ])
+        self.trigger['data']['record_watch_info']['conditions'].append(owner_filter)
+        write_json(self.project_path, self.binding)
+        self.pin()
+        return owner_filter
+
+    def test_bound_assistant_proves_definition_including_disabled_rule(self):
+        owner_filter = self.set_assistant_owner()
+        self.set_project_guard()
+        self.definition['status'] = 'disabled'
+        for label in ('示例助手', '新的显示名', None):
+            with self.subTest(label=label):
+                person = owner_filter['value'][0]['value']
+                if label is None:
+                    person.pop('name')
+                else:
+                    person['name'] = label
+                self.pin()
+                result = self.verify()
+                self.assertTrue(result['definition_matches'] and result['project_scope_verified'], result)
+                self.assertTrue(result['fixed_bot_owner_verified'])
+                self.assertEqual(result['owner_condition'], 'bound_assistant')
+                self.assertFalse(result['enabled'] or result['dispatch_checked'])
+
+    def test_exact_owner_rejects_wrong_identity_type_arity_and_conditions(self):
+        correct = self.set_assistant_owner()
+        conditions = self.trigger['data']['record_watch_info']['conditions']
+        for label, mutate in {
+            'same name, different id': lambda f: f['value'][0]['value'].update(id='ou_someone'),
+            'name only': lambda f: f['value'][0]['value'].pop('id'),
+            'wrong value type': lambda f: f['value'][0].update(value_type='text'),
+            'dynamic value': lambda f: f['value'][0].update(step_id='trigA'),
+            'dynamic person': lambda f: f['value'][0]['value'].update(field_name='其他人'),
+            'multiple people': lambda f: f['value'].append(copy.deepcopy(f['value'][0])),
+            'nonempty': lambda f: f.update(operator='isNotEmpty', value=[]),
+            'contains': lambda f: f.update(operator='contains'),
+            'wrong field': lambda f: f.update(field_name='其他人'),
+            'duplicate condition': lambda f: conditions.append(copy.deepcopy(f)),
+        }.items():
+            with self.subTest(label=label):
+                changed = copy.deepcopy(correct)
+                before = conditions[:-1]
+                conditions[-1] = changed
+                mutate(changed)
+                self.pin()
+                result = self.verify()
+                self.assertFalse(result['definition_matches'] or result['fixed_bot_owner_verified'], result)
+                conditions[:] = before + [correct]
+        self.rule.pop('owner_match')
+        self.pin()
+        result = self.verify()
+        self.assertFalse(result['definition_matches'] or result['fixed_bot_owner_verified'], result)
+
+    def test_exact_owner_requires_single_person_field_and_bound_actor(self):
+        self.set_assistant_owner()
+        projected = self.mapped['person']
+        native = self.raw[-1]
+        for field, key, invalid in [
+            (projected, 'type', 'text'), (projected, 'multiple', True), (projected, 'multiple', None),
+            (native, 'type', 3), (native, 'ui_type', 'SingleSelect'), (native, 'property', {'multiple': True}),
+        ]:
+            with self.subTest(key=key, invalid=invalid):
+                original = field[key]
+                field[key] = invalid
+                result = self.verify()
+                self.assertFalse(result['definition_matches'] or result['fixed_bot_owner_verified'], result)
+                field[key] = original
+        self.contract['steps'][1]['person_field'] = None
+        write_json(self.project_path, self.binding)
+        self.assertFalse(self.verify()['fixed_bot_owner_verified'])
+        self.contract['steps'][1]['person_field'] = 'person'
+        self.actor['open_id'] = 'ou_replacement'
+        write_json(self.project_path, self.binding)
+        self.assertFalse(self.verify()['fixed_bot_owner_verified'])
+
+    def test_exact_owner_registration_and_diagnostic_boundaries(self):
+        self.set_assistant_owner()
+        for changed in (dict(owner_match=None), dict(owner_match='display_name'), dict(owner_field_id=None)):
+            with self.subTest(changed=changed), self.assertRaises(module.Unverified):
+                module.checked_rule(dict(self.rule, **changed))
+        self.rule['role'] = 'diagnostic'
+        self.pin()
+        result = self.verify()
+        self.assertTrue(result['fixed_bot_owner_verified'], result)
+        self.assertIsNone(result['source_ai_in_project_contract'])
+        self.assertFalse(result['dispatch_checked'] or result['project_scope_verified'])
+
     def test_live_link_and_record_prove_only_the_project_condition(self):
         self.set_project_guard()
         result = self.verify()
