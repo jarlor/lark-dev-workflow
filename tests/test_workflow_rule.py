@@ -449,6 +449,57 @@ class WorkflowRuleTests(RuntimeFixture):
         self.reader.read_record.return_value = {'record_id': 'recProject', 'values': {'fldNumber': 'PRJ-0001'}}
         self.pin()
 
+    def test_registered_marker_event_round_trip_uses_production_reader_without_waking_worker(self):
+        import comments
+        import gate_events
+        import stage_business
+        import time
+
+        self.set_stage_request('work-start')
+        self.service.update(mode='dispatch', tick_argv=[sys.executable, '{runner_config}'])
+        write_json(self.service_path, self.service)
+        self.config.update(native_stage_mode='registered_requests', stage_service_config=str(self.service_path))
+        self.save_config()
+        now = int(time.time())
+        directory = Path(self.config['state_dir'])
+        record = 'recItem'
+        snapshot = self.snapshot
+        snapshot.update(binding=comments.binding_identity(self.binding), coverage={'feedback': {'mode': 'linked_only'}})
+        project_field = self.rule['guard']['field_id']
+        snapshot['records']['tblWork/' + record]['fields'][project_field] = [{'id': 'recProject'}]
+        snapshot['records']['tblProjects/recProject'] = dict(role='projects', fields={})
+        snapshot['gate_status_options'] = {'tblWork/fldStage': self.binding['tables']['work']['fields']['status']['options']}
+        with mock.patch.object(gate_events.time, 'time', return_value=now - 5):
+            journal = bridge.Journal(self.service)
+            gate_events.publish_scope(self.config, self.binding, snapshot, directory)
+        text = self.rule['marker_text']
+        def event(key, *, actor='ou_assistant', row=record, value=text):
+            return dict(header=dict(app_id='cli_demo', tenant_key='tenant', event_type=bridge.RECORD, event_id=key),
+                        event=dict(file_token='FixtureBase', file_type='bitable', table_id='tblWork',
+                                   operator_id={'open_id': actor}, revision=33, update_time=now,
+                                   action_list=[dict(record_id=row, action='record_edited', before_value=[],
+                                       after_value=[dict(field_id='fldMarker',
+                                           field_value=json.dumps([{'type': 'text', 'text': value}]))])]))
+        witness = lambda: stage_business.marker_receipt(self.service_path, 'tblWork', record, 'fldMarker', 33)
+        for edit in (event('human',actor='ou_person'), event('outside',row='recOther'),
+                     event('freeform',value='用户填写的其他内容')):
+            bridge.receive(edit, self.service, journal)
+            self.assertIsNone(witness())
+        count = journal.status()['received']
+        for _ in range(2):
+            self.assertFalse(bridge.receive(event('evtMarker'), self.service, journal))
+        proof = witness()
+        self.assertEqual((proof['operator_open_id'], proof['event_id'], proof['revision'], proof['update_time'],
+                          proof['before'], proof['after']), ('ou_assistant','evtMarker',33,now,'',text))
+        self.assertEqual(journal.status()['received'], count)
+        journal.publish(self.service, directory, count)
+        self.assertEqual(json.loads((directory/gate_events.BATCH).read_text())['rows'], [])
+        self.assertIsNone(stage_business.marker_receipt(self.service_path, 'tblWork', record, 'fldMarker', 34))
+        moved = event('relocated')
+        moved['event']['action_list'][0]['after_value'].append(dict(field_id=project_field, field_value='"recOther"'))
+        bridge.receive(moved, self.service, journal)
+        self.assertIsNone(witness())
+
     def test_six_stage_request_definitions(self):
         for key in REQUEST_CASES:
             with self.subTest(key=key):

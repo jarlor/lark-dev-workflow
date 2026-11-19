@@ -24,6 +24,7 @@ import run_context
 import work_packet
 import own_effects
 import gate_events
+import registered_requests
 
 HERE = Path(__file__).resolve().parent
 # These are workflow limits for the existing worker, not operating-system permissions.
@@ -75,6 +76,9 @@ def identity(config, binding):
         value['access'] = config['access']
     if config.get('native_stage_mode') == 'prepare':
         value.update(native_stage_mode='prepare', event_tenant_key=config['event_tenant_key'])
+    if config.get('native_stage_mode') == registered_requests.MODE:
+        value.update(native_stage_mode=registered_requests.MODE, event_tenant_key=config['event_tenant_key'],
+                     stage_service_config=config['stage_service_config'])
     return digest(value)
 
 
@@ -131,9 +135,10 @@ def other_mode_state(config, binding):
             raise RunnerError('另一种运行方式仍有未核实的写入。请用原方式核对并收尾，再切换。')
         other_config = dict(config)
         if other == root:
-            other_config.pop('native_stage_mode')
+            other_config.pop('native_stage_mode', None)
         elif config['format_version'] == 3 and config.get('event_tenant_key'):
             other_config['native_stage_mode'] = 'prepare'
+            other_config.pop('stage_service_config', None)
         else:
             return None
         if state.get('format_version') == 1 and state.get('identity') == identity(other_config, binding):
@@ -201,7 +206,7 @@ def project_governance(config, binding):
     return governance, {'source': str(source), 'content': content}
 
 
-def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expected_binding=None):
+def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expected_binding=None, *, policy=None):
     instructions = (HERE.parent / 'references/unattended-worker.md').read_text(encoding='utf-8')
     binding = read_json(config['project_config'])
     if expected_binding is not None and (
@@ -243,6 +248,12 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
     }
     if config.get('native_stage_mode') == 'prepare':
         context['execution_scope'] = PREPARE_SCOPE
+    if config.get('native_stage_mode') == registered_requests.MODE:
+        if policy is None or registered_requests.selected(config, binding) != policy:
+            raise RunnerError('采集后已登记的助手规则发生变化，请重新读取项目。')
+        context['execution_scope'] = policy
+        context['stage_action'] = str(registered_requests.SERVICE / 'stage_action.py')
+        context['stage_service_config'] = config['stage_service_config']
     if reason == 'mode_changed':
         prior = other_mode_state(config, binding)
         context['previous_mode_state_file'] = str(prior) if prior else None
@@ -346,7 +357,8 @@ def execute(config, state, run_dir, prompt, lock_fd, save_state):
     return read_json(run_dir / 'result.json'), session_id
 
 
-def collect_snapshot(config, binding, directory, collector, *, inspect_native_stages=False, prepare=False):
+def collect_snapshot(config, binding, directory, collector, *, inspect_native_stages=False, prepare=False,
+                     registered_policy=None):
     control.actor_for_runner(config, binding)
     # Use the selected executable itself and retain PATH for its runtime (for example Node).
     old_path = os.environ.get('PATH')
@@ -356,7 +368,7 @@ def collect_snapshot(config, binding, directory, collector, *, inspect_native_st
             from browser_watch import collect as browser_collect
             return browser_collect(binding, config['access'],
                                    comments_state_path=directory / 'browser-comments-state.json')
-        inspect = inspect_native_stages or prepare
+        inspect = inspect_native_stages or prepare or registered_policy is not None
         options = {'inspect_native_stages': True} if inspect else {}
         snapshot = collector(binding, config['lark_profile'], comments_state_path=directory / 'comments-state.json',
                              lark_bin=config['lark_bin'], **options)
@@ -369,6 +381,15 @@ def collect_snapshot(config, binding, directory, collector, *, inspect_native_st
                     {'node_settings_verified': False, 'dispatch_verified': False}):
                 raise RunnerError('反馈与计划模式未核实原生流程类型和可见状态。')
             snapshot['coverage']['execution_scope'] = PREPARE_SCOPE
+        if registered_policy is not None:
+            expected = {t['id'] + '/' + t['fields']['status']['id']
+                        for role, t in binding['tables'].items() if role in ('requirements', 'bugs', 'work')}
+            if (config.get('native_stage_mode') != registered_requests.MODE or len(expected) != 3
+                    or set(snapshot['native_stage_inspection']) != expected
+                    or snapshot['coverage']['native_stage_inspection'] !=
+                    {'node_settings_verified': False, 'dispatch_verified': False}):
+                raise RunnerError('无法核实三张事项表的原生状态字段，本轮未取得办理动作的依据。')
+            snapshot['coverage']['execution_scope'] = registered_policy
         return snapshot
     finally:
         if old_path is None:
@@ -386,6 +407,8 @@ def scan_only(config_path, *, collector=watch.collect, inspect_native_stages=Fal
         binding = read_json(config['project_config'])
         root = Path(config['state_dir'])
         prepare = config.get('native_stage_mode') == 'prepare' and not inspect_native_stages
+        registered = config.get('native_stage_mode') == registered_requests.MODE and not inspect_native_stages
+        policy = registered_requests.selected(config, binding, runner_path=config_path) if registered else None
         output_dir = directory
         if inspect_native_stages:
             if config['format_version'] != 3 or not control.actor_for_runner(config, binding):
@@ -394,16 +417,21 @@ def scan_only(config_path, *, collector=watch.collect, inspect_native_stages=Fal
             output_dir.mkdir(mode=0o700, exist_ok=True)
         scan_started = int(time.time())
         snapshot = collect_snapshot(config, binding, output_dir, collector,
-                                    inspect_native_stages=inspect_native_stages, prepare=prepare)
-        if (inspect_native_stages or prepare) and (control.load_config(config_path) != config
+                                    inspect_native_stages=inspect_native_stages, prepare=prepare, registered_policy=policy)
+        if (inspect_native_stages or prepare or registered) and (control.load_config(config_path) != config
                                                    or read_json(config['project_config']) != binding):
             raise RunnerError('检查期间项目绑定已变更。请使用当前配置重新检查。')
+        if policy is not None and registered_requests.selected(config, binding, runner_path=config_path) != policy:
+            raise RunnerError('采集期间助手规则已变，请重新检查。')
         atomic_json(output_dir / 'last-scan.json', snapshot)
         scope = gate_events.publish_scope(config, binding, snapshot, root, started_at=scan_started)
         status = 'scanned'
         details = {}
         if prepare:
             status = 'scanned_for_preparation'
+            details = {'snapshot_file': str(output_dir / 'last-scan.json')}
+        if registered:
+            status = 'scanned_for_registered_requests'
             details = {'snapshot_file': str(output_dir / 'last-scan.json')}
         if inspect_native_stages:
             status = 'inspected'
@@ -468,18 +496,21 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             root = Path(config['state_dir'])
             prepare = config.get('native_stage_mode') == 'prepare'
             prior_mode_state = other_mode_state(config, binding)
-            mode = 'prepare' if prepare else 'strict'
+            mode = config.get('native_stage_mode', 'strict')
+            policy = (registered_requests.selected(config, binding, runner_path=config_path)
+                      if mode == registered_requests.MODE else None)
             mode_file = root / 'last-execution-mode.json'
             previous_mode = read_json(mode_file) if mode_file.exists() else 'strict'
-            if previous_mode not in ('strict', 'prepare'):
+            if previous_mode not in ('strict', 'prepare', registered_requests.MODE):
                 raise RunnerError('上次运行方式无法核实。请核对原记录。')
             scan_started = int(time.time())
-            snapshot = collect_snapshot(config, binding, directory, collector, prepare=prepare)
+            snapshot = collect_snapshot(config, binding, directory, collector, prepare=prepare, registered_policy=policy)
             current_config = control.load_config(config_path)
             current_binding = read_json(current_config['project_config'])
             if (identity(current_config, current_binding) != identity(config, binding)
                     or current_config.get('event_tenant_key') != config.get('event_tenant_key')
-                    or (prepare and (current_config != config or current_binding != binding))):
+                    or ((prepare or policy) and (current_config != config or current_binding != binding))
+                    or (policy is not None and registered_requests.selected(config, binding, runner_path=config_path) != policy)):
                 raise RunnerError('本轮采集期间登录方式、账号或运行绑定已改变；不会继续使用旧快照。')
             snapshot_id = digest(stable_snapshot(snapshot))
             timestamp = clock()
@@ -526,6 +557,11 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             packet = work_packet.build_work_packet(snapshot, packet_baseline, binding)
             if prepare:
                 packet['execution_scope'] = PREPARE_SCOPE
+            if policy is not None:
+                packet['execution_scope'] = policy
+                clicks = registered_requests.retain_clicks(config, binding, snapshot, gate_rows)
+                if clicks:
+                    packet['confirmation_checks'] = clicks
             if gate_rows:
                 # The active worker owns this file until it finishes. Archived packets
                 # keep its path and run ID, never an unbounded copy of observed events.
@@ -542,7 +578,7 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             session_plan = run_context.prepare_session(state, directory, config['session_max_runs'])
             state['session_runs'] = run_context.session_runs(state, config['session_max_runs'])
             prompt = build_prompt(config, state, run_id, snapshot_id, run_dir / 'snapshot.json',
-                                  reason, binding)
+                                  reason, binding, **({'policy': policy} if policy is not None else {}))
             state['inflight'] = {'run_id': run_id, 'snapshot_id': snapshot_id,
                                  'started_at': now(), 'directory': str(run_dir), 'phase': 'starting',
                                  'session_mode': session_plan['mode'],
@@ -657,8 +693,9 @@ def parser():
             child.add_argument('--access', choices=('cli', 'browser', 'bot'), default='cli')
             child.add_argument('--lark-profile')
             child.add_argument('--event-tenant-key', help='Paired tenant for scoped event evidence (bot only).')
-            child.add_argument('--native-stage-mode', choices=('prepare',),
-                               help='专用助手按可见流程核对反馈及准备计划。')
+            child.add_argument('--stage-service-config', type=Path, help='本项目长连接服务的配置文件。')
+            child.add_argument('--native-stage-mode', choices=('prepare', registered_requests.MODE),
+                               help='prepare 可准备反馈和计划。registered_requests 可按本项目已登记的六条规则办理事项。')
             child.add_argument('--browser-cdp-url')
             child.add_argument('--browser-user-id')
             child.add_argument('--node-bin')
@@ -676,7 +713,8 @@ def main(argv=None):
                                          args.lark_profile, args.interval_minutes, args.codex_profile,
                                          access=args.access, browser_cdp_url=args.browser_cdp_url,
                                          browser_user_id=args.browser_user_id, node_bin=args.node_bin,
-                                         event_tenant_key=args.event_tenant_key, native_stage_mode=args.native_stage_mode)
+                                         event_tenant_key=args.event_tenant_key, native_stage_mode=args.native_stage_mode,
+                                         stage_service_config=args.stage_service_config)
         elif args.command == 'check':
             config = control.load_config(args.config)
             binding = read_json(config['project_config'])
@@ -688,6 +726,8 @@ def main(argv=None):
                       'remote_access_verified': False, 'cron_installed_verified': False}
             if config.get('native_stage_mode') == 'prepare':
                 output['execution_scope'] = PREPARE_SCOPE
+            if config.get('native_stage_mode') == registered_requests.MODE:
+                output['execution_scope'] = registered_requests.selected(config, binding, runner_path=args.config)
         elif args.command in ['tick', 'scan']:
             if not sys.platform.startswith('linux'):
                 raise RunnerError('首版定时执行仅支持 Linux。')

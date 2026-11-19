@@ -185,7 +185,9 @@ class Journal:
     def mark(self, event_id, kind=RECORD, *, index=None, table_id=None, moved=(), changes=(), own=False):
         digest = hashlib.sha256(event_id.encode()).hexdigest()
         with self.connect() as conn:
-            if own and not moved:
+            if own:
+                changes = [c for c in changes if c.get('value_format') == gate_events.ASSISTANT_MARKER]
+            if own and not moved and not changes:
                 return False
             added = conn.execute('INSERT OR IGNORE INTO seen(id) VALUES (?)', (digest,))
             if not added.rowcount:
@@ -202,11 +204,10 @@ class Journal:
                     # Overflow cannot erase an invalidation and re-enable a stale member.
                     conn.execute('DELETE FROM membership_barriers')
                     conn.execute("INSERT INTO membership_barriers VALUES ('','',?,NULL)", (closed,))
-            if own:
-                return False
-            conn.execute('UPDATE state SET generation=generation+1')
+            if not own:
+                conn.execute('UPDATE state SET generation=generation+1')
             if changes:
-                generation, = conn.execute('SELECT generation FROM state').fetchone()
+                generation = 0 if own else conn.execute('SELECT generation FROM state').fetchone()[0]
                 reset_after = self.evidenced_after(conn, '', '', index)
                 allowed = []
                 if reset_after is not None:
@@ -223,8 +224,13 @@ class Journal:
                                             json.dumps(change)))
                 conn.executemany('INSERT INTO receipts(generation,binding,table_id,record_id,data) VALUES(?,?,?,?,?)',
                                  allowed[-gate_events.LIMIT:])
-                conn.execute('DELETE FROM receipts WHERE seq NOT IN '
-                             '(SELECT seq FROM receipts ORDER BY seq DESC LIMIT ?)', (gate_events.LIMIT,))
+                # Generation zero holds only the assistant's own marker evidence.
+                # Keep its retention separate from human decisions and do not wake a worker for it.
+                conn.execute('DELETE FROM receipts WHERE (generation=0)=? AND seq NOT IN '
+                             '(SELECT seq FROM receipts WHERE (generation=0)=? ORDER BY seq DESC LIMIT ?)',
+                             (own, own, gate_events.LIMIT))
+            if own:
+                return False
             conn.execute('INSERT OR IGNORE INTO notices VALUES (?,0,0)', (kind,))
             conn.execute('UPDATE notices SET total=total+1, latest=? WHERE kind=?', (int(time.time()), kind))
         return True
@@ -235,7 +241,7 @@ class Journal:
             return
         with self.connect() as conn:
             journal_id, = conn.execute('SELECT id FROM receipt_source').fetchone()
-            rows = conn.execute('SELECT generation,data FROM receipts WHERE binding=? AND generation<=? '
+            rows = conn.execute('SELECT generation,data FROM receipts WHERE binding=? AND generation>0 AND generation<=? '
                                 'ORDER BY seq', (index['signature'], generation)).fetchall()
         filtered = []
         for row_generation, payload in rows:
@@ -328,6 +334,8 @@ def gate_changes(event, event_id, table_id, open_id, table, listening_since, sco
         for field_id in table['fields']:
             old = [field(v, 'field_value') for v in before if field(v, 'field_id') == field_id]
             new = [field(v, 'field_value') for v in after if field(v, 'field_id') == field_id]
+            if table['fields'][field_id] == gate_events.ASSISTANT_MARKER and not old:
+                old = [None]  # The platform may omit an empty field in before_value.
             if len(old) != 1 or len(new) != 1:
                 continue
             try:
@@ -359,7 +367,11 @@ def receive(envelope, config, journal):
             return False
         index = journal.scope(config)
         if index and table_id in index['tables']:
-            moved, changes = gate_changes(event, event_id, table_id, actor, index['tables'][table_id],
+            table = index['tables'][table_id]
+            if actor == config['bot_open_id'] and config.get('mode') == 'dispatch':
+                import workflow_rule
+                table = workflow_rule.marker_watch(config, journal.runner_paths, table_id, table)
+            moved, changes = gate_changes(event, event_id, table_id, actor, table,
                                           journal.started_at, index['project_scope'])
             return journal.mark(event_id, kind, index=index, table_id=table_id, moved=moved, changes=changes,
                                 own=(actor == config['bot_open_id']))

@@ -160,7 +160,35 @@ def wire_option(raw):
     return raw
 
 
+ASSISTANT_MARKER = 'registered_assistant_marker'
+
+
+def marker_value(raw):
+    if raw is None or raw == '':
+        return ''
+    if not isinstance(raw, str) or len(raw) > 2048:
+        raise ValueError('Unknown marker encoding')
+    try:
+        value = json.loads(raw)
+    except ValueError:
+        return raw
+    if value is None or value == []:
+        return ''
+    if isinstance(value, str):
+        return value
+    if (isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict)
+            and value[0].get('type') == 'text' and isinstance(value[0].get('text'), str)):
+        return value[0]['text']
+    raise ValueError('Unknown text marker encoding')
+
+
 def changed_values(table, field_id, old, new):
+    if table['fields'].get(field_id) == ASSISTANT_MARKER:
+        previous, current = marker_value(old), marker_value(new)
+        allowed = table['marker_values'][field_id]
+        if current in allowed and (not previous or previous in allowed) and current != previous:
+            return dict(before=previous, after=current, value_format=ASSISTANT_MARKER)
+        return None
     if field_id == table.get('native_stage_field_id'):
         before, after = wire_option(old), wire_option(new)
         if opaque_pair(before, after):

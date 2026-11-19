@@ -36,7 +36,7 @@ def require(test, reason):
         raise Pending(reason)
 
 
-def receipt(config, binding, paths, table_id, record_id, field_id, before, after):
+def receipt_rows(config, binding, paths, table_id, record_id, field_id, *, marker=False):
     """Only the existing service database is eligible, never worker-supplied evidence."""
     now = int(time.time())
     index = bridge.load(Path(paths[1]) / gate_events.INDEX)
@@ -46,8 +46,12 @@ def receipt(config, binding, paths, table_id, record_id, field_id, before, after
             '请先用本项目的助手重新做一次只读扫描。')
     table = index['tables'].get(table_id, {})
     since = table.get('since', {}).get(record_id)
+    if marker:
+        import workflow_rule
+        table = workflow_rule.marker_watch(config, paths, table_id, table)
+    expected = gate_events.ASSISTANT_MARKER if marker else 'status'
     require(record_id in table.get('records', []) and type(since) is int
-            and table.get('fields', {}).get(field_id) == 'status', '这条记录不在已核实的项目范围内。')
+            and table.get('fields', {}).get(field_id) == expected, '这条记录不在已核实的项目范围内。')
     directory = Path(config['state_dir'])
     path = directory / 'hints.sqlite'
     require(stat.S_ISDIR(directory.lstat().st_mode) and directory.stat().st_uid == os.geteuid()
@@ -64,8 +68,8 @@ def receipt(config, binding, paths, table_id, record_id, field_id, before, after
         for reopened, in barriers:
             require(type(reopened) is int, '记录归属有过变化，当前仍待核实。')
             since = max(since, reopened)
-        rows = db.execute('SELECT data FROM receipts WHERE binding=? AND table_id=? AND record_id=?',
-                          (signature, table_id, record_id)).fetchall()
+        rows = db.execute('SELECT data FROM receipts WHERE binding=? AND table_id=? AND record_id=? AND (generation=0)=?',
+                          (signature, table_id, record_id, marker)).fetchall()
     edits = []
     for payload, in rows:
         row = json.loads(payload)
@@ -76,6 +80,11 @@ def receipt(config, binding, paths, table_id, record_id, field_id, before, after
                     '该条状态事件的时间或版本不完整。')
             if row['update_time'] > max(since, now - gate_events.MAX_AGE):
                 edits.append(row)
+    return table, edits
+
+
+def receipt(config, binding, paths, table_id, record_id, field_id, before, after):
+    table, edits = receipt_rows(config, binding, paths, table_id, record_id, field_id)
     require(edits, '尚未收到能核实这条记录状态前后变化的事件。')
     latest = max(edits, key=lambda e: e['event_revision'])
     require(sum(e['event_revision'] == latest['event_revision'] or e['update_time'] >= latest['update_time']

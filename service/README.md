@@ -6,7 +6,7 @@
 
 1. 在项目所属组织建立或选择专用企业自建应用，开启机器人能力，设置名称及参与人可用范围。在同一 Linux 用户下配置专用 CLI profile。独立助手使用 `--as bot`；不要修改其他项目的 profile。云端表与应用的租户、应用 ID、机器人 open ID、测试表身份均须核对。只在非业务的飞书测试副本先联调。
 2. 服务从 Linux 主动连接飞书，无须开放入站端口。在开发者后台选择「使用长连接接收事件」，添加下表两种事件并发布应用版本。如果用下面的 `pair` 首次接入，等它退出后再启动 `observe`。同一个应用同时只运行一个接收端。整个接入使用已有飞书免费能力。[飞书长连接设置](https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-/request-url-configuration-case)
-3. 后台选好事件后，还要用助手身份订阅。先在专用测试副本验证，再对实际项目操作。
+3. 后台选好事件后，还要订阅具体文件。先在专用测试副本验证，再按文件管理人选定的方式接入正式表。
 
 | 希望收到什么 | 谁来订阅、订阅哪里 |
 | --- | --- |
@@ -70,7 +70,7 @@ systemd-run --wait --pipe --collect --property=User=lark-workflow \
 sh /path/to/lark-dev-workflow/scripts/unattended.sh scan --config /path/to/runner.json --inspect-native-stages
 ```
 
-这会读全项目记录和评论，核对原生字段类型、可见状态和绑定时的顺序。结果单独保存在执行器状态目录的 `native-stage-inspection/`。已配对组织时，这次检查也会为本项目的记录登记事件范围。读到一条人点过的记录后，再按下文核实是谁点的、确认了哪一版。身份交接、绑定迁移和自动派工仍使用完整检查。
+这会读全项目记录和评论，核对原生字段类型、可见状态和绑定时的顺序。结果单独保存在执行器状态目录的 `native-stage-inspection/`。已配对组织时，这次检查也会为本项目的记录登记事件范围。读到一条人点过的记录后，再按下文核实是谁点的、确认了哪一版。这个只读结果可用于定位问题。办理已登记的六个动作，还需逐条核对线上规则和本项目的确认、构建及测试依据。
 
 希望同一个 Linux 执行器先处理反馈、写计划时，在已配对组织的专用助手运行配置中设置 `"native_stage_mode": "prepare"`。把本项目的服务配置和下方确认工具的实际路径写进已有项目规则，方便执行器核对人的点击。沿用同一个服务和 `tick` 入口。它会把这类运行的会话和处理进度单独保存。项目原来的只读或暂停要求继续生效。可处理到哪一步，见 [只处理反馈和计划](../skill/lark-dev-workflow/references/assistant-identity.md#只处理反馈和计划)。
 
@@ -154,7 +154,33 @@ python3 service/verify_confirmation.py --config "$bridge_config" \
 
 测试副本和正式表共用一个飞书应用时，切换前先停测试接收器。飞书会把每个事件分给其中一个连接。两个服务各自只处理自己的表时，事件可能分到另一边。切换后，用正式表的一次真实变化核对服务确实收到了通知。[飞书长连接说明](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)
 
-检查正式表的记录通知时，要用本项目的助手查询这份表的事件订阅。助手能编辑表或收到评论，仍需另查记录通知。飞书要求应用是文件所有者或可管理协作者。查询被拒时，保留原来的处理方式。是否给助手增加这份表的管理权限，由文件所有者决定。[飞书文件事件订阅](https://open.feishu.cn/document/server-docs/docs/drive-v1/event/subscribe.md)
+### 让同一个 Codex 办理六个动作
+
+在测试副本走通六步后，管理员为要接入的项目保存六份已核对的规则，按上表登记在本项目的 `ai-node-rules.json`。每条记录都填写从飞书读回的 `definition_sha256`。正式接手时，逐条核实规则已启用，保留原项目的负责人、暂停事项和人工确认记录。
+
+在专用助手的 `runner.json` 中设置 `native_stage_mode` 为 `registered_requests`，将 `stage_service_config` 设为同一项目 `bridge.json` 的绝对路径。继续使用项目原有的 Codex 和工作目录。运行 `unattended.sh scan --config "$runner_config"`，它会读回本项目的记录、评论和三张表可见的流程节点。办理具体一步时，执行器使用下面的入口。
+
+```sh
+python3 service/stage_action.py --config "$bridge_config" --action work-start --record-id "$record_id"
+```
+
+返回 `completed` 表示已从这行的飞书历史核实节点推进。`already_completed` 表示同一个动作之前已经完成。返回 `pending` 时先看原因。上一次写请求没有收到应答时，用原参数重查。服务会把飞书发来的助手写入通知与本行历史逐项核对。若当时没收到这条通知，事项保持待核实，请勿重发同一请求。工具只为分给这个助手的研发项开工或交付。需求和 Bug 送验前，还会核对关联研发项、同一构建的测试结果和留给人的验收记录。
+
+测试结果来自项目已有的运行报告、制品或部署检查。服务管理员把本项目的 `read_evidence.py` 和 `registration.json` 安装在服务配置同级的 `stage-proof-source/` 中。登记读取器的 SHA256、允许读取的证据目录以及本服务和执行器的标识。读取器由管理员维护，服务账号只需读权限。接口定义见 [stage_source.py](stage_source.py)，业务核对见 [stage_business.py](stage_business.py)。接入时用本项目实际产生的报告验证。某一项缺少测试或部署材料时，助手会在那一步等待。范围确认、计划确认和最后验收继续由指定的人在事项里点「完成节点」。
+
+### 由表管理人一次订阅正式表
+
+如果项目选择由人订阅，用同一个研发助手应用在飞书后台给**用户身份**开通 `docs:event:subscribe`，在用户身份的事件列表中添加多维表格记录变更事件，发布后核实已生效。保留原服务使用的应用身份事件。让这张表的管理人在独立的 CLI 配置中登录该应用，授权页应显示正确的组织和应用名。
+
+在服务器上，用这个独立配置对指定的正式表执行下面两条命令。`manager_profile` 是此次授权的管理人配置，`base_token` 是正式表的文件标识。若用了独立的 CLI 配置目录，两条命令须使用同一目录。
+
+```sh
+lark-cli api POST "/open-apis/drive/v1/files/${base_token}/subscribe" --params '{"file_type":"bitable"}' --profile "$manager_profile" --as user
+lark-cli api GET "/open-apis/drive/v1/files/${base_token}/get_subscribe" --params '{"file_type":"bitable"}' --profile "$manager_profile" --as user
+```
+
+第二条命令返回 `is_subscribe: true` 后，再从正式表的一次真实改动核对 Linux 收到的文件、表、记录和修订号。如果服务器没有收到，按飞书保存的修改时间到开发者后台查「事件日志」。只有订阅结果、没有对应投递时，保留原调度。服务平时用研发助手读取事项、发表评论、提醒同事。管理人的授权只用于这张表的订阅。若项目选择让机器人自己订阅，机器人需要拥有或管理这份文件。两种方式都应保留原调度，直到新服务通过切换检查。[订阅文件事件](https://open.feishu.cn/document/server-docs/docs/drive-v1/event/subscribe) · [查询订阅状态](https://open.feishu.cn/document/uAjLw4CM/ukTMukTMukTM/reference/drive-v1/file/get_subscribe)
+
 
 ## 启动同一个执行器
 

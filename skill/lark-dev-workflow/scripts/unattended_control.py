@@ -111,9 +111,13 @@ def _validate(value, config_path):
         expected = expected | {'event_tenant_key'}
         _text(value['event_tenant_key'], 'event_tenant_key')
     if 'native_stage_mode' in value:
-        if version != 3 or value['native_stage_mode'] != 'prepare' or 'event_tenant_key' not in value:
-            raise ControlError('native_stage_mode=prepare 需要已配置 event_tenant_key 的专用助手。')
+        if version != 3 or value['native_stage_mode'] not in ('prepare', 'registered_requests') or 'event_tenant_key' not in value:
+            raise ControlError('原生流程模式需要已配置 event_tenant_key 的专用助手。')
         expected = expected | {'native_stage_mode'}
+        if value['native_stage_mode'] == 'registered_requests':
+            expected = expected | {'stage_service_config'}
+            if not isinstance(value.get('stage_service_config'), str) or not Path(value['stage_service_config']).is_absolute():
+                raise ControlError('请指定本项目长连接服务配置的绝对路径。')
     if set(value) - set(OPTIONAL_CONFIG_FIELDS) != expected:
         missing = sorted(expected - set(value))
         unknown = sorted(set(value) - expected - set(OPTIONAL_CONFIG_FIELDS))
@@ -214,7 +218,7 @@ def _new_json(path, value):
 def init_config(path, project_config, workdir, lark_profile=None, interval_minutes=5,
                 codex_profile=None, *, access='cli', browser_cdp_url=None,
                 browser_user_id=None, node_bin=None, which=shutil.which, event_tenant_key=None,
-                native_stage_mode=None):
+                native_stage_mode=None, stage_service_config=None):
     """Create a new private configuration without touching the project binding."""
     # Reject a dangling link too: resolving first could otherwise create its target.
     try:
@@ -264,6 +268,8 @@ def init_config(path, project_config, workdir, lark_profile=None, interval_minut
     }
     if native_stage_mode is not None:
         value['native_stage_mode'] = native_stage_mode
+    if stage_service_config is not None:
+        value['stage_service_config'] = str(_absolute(stage_service_config, 'stage_service_config'))
     if event_tenant_key is not None:
         value['event_tenant_key'] = event_tenant_key
     if access != 'browser':

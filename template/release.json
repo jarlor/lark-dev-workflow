@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.3.0",
+    "skill_version": "2.4.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -64,7 +64,9 @@
         ],
         "ordinary_comments": "periodic_reconciliation",
         "scheduler": "single_service_reuses_project_tick",
-        "native_stage_mode_prepare": "feedback_plans_and_confirmation_checks_only"
+        "native_stage_mode_prepare": "feedback_plans_and_confirmation_checks_only",
+        "native_stage_mode_registered_requests": "six_pinned_actions_require_actual_human_and_execution_evidence",
+        "file_subscription": "assistant_file_manager_or_one_time_authorized_user"
       }
     },
     "template_versions_read": [
@@ -96,7 +98,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 464,
+  "automated_tests_passed": 505,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -108,8 +110,8 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.3.0",
-  "documentation_updated_on": "2026-11-19",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.0",
+  "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
       "independent_checks_passed": 15,
@@ -422,32 +424,57 @@
       ],
       "target_linux_installed": false,
       "installation_note": "The release candidate was verified in a private Linux test installation. Production cutover is separate."
+    },
+    "2.3.0": {
+      "date": "2026-11-19",
+      "tests": 464,
+      "environments": [
+        "local SDK suite",
+        "isolated Linux SDK suite",
+        "same-tenant Feishu test copy"
+      ],
+      "scope": [
+        "six_disabled_rule_definitions_read_and_pinned_twice",
+        "new_request_value_matches_field_watch_and_old_value_is_rejected",
+        "record_project_equality_and_other_writer_checked_in_live_test",
+        "receiver_membership_checked_before_requesting_scope_confirmation",
+        "acceptance_click_and_business_revision_checked_separately_from_delivery"
+      ],
+      "not_validated": [
+        "production_project_deployment_and_scheduler_handoff",
+        "long_term_free_allowance"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "The dedicated assistant features were checked on a test copy. Switching an existing project requires its own verification."
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.3.0",
+  "release_version": "2.4.0",
   "skill_release_validation": {
-    "version": "2.3.0",
-    "date": "2026-11-19",
-    "tests": 464,
+    "version": "2.4.0",
+    "date": "2026-11-20",
+    "tests": 505,
     "environments": [
-      "local SDK suite",
-      "isolated Linux SDK suite",
-      "same-tenant Feishu test copy"
+      "Linux with the Feishu SDK (505 passed)",
+      "macOS (502 passed, 3 Linux-only checks skipped)",
+      "same-organization Feishu test copy"
     ],
     "scope": [
-      "six_disabled_rule_definitions_read_and_pinned_twice",
-      "new_request_value_matches_field_watch_and_old_value_is_rejected",
-      "record_project_equality_and_other_writer_checked_in_live_test",
-      "receiver_membership_checked_before_requesting_scope_confirmation",
-      "acceptance_click_and_business_revision_checked_separately_from_delivery"
+      "six_test_copy_transitions_observed_in_real_record_history",
+      "test_copy_request_replay_and_source_actor_checked",
+      "original_human_click_and_delivery_evidence_verified_separately",
+      "same_server_codex_read_only_replay_waited_for_human_acceptance",
+      "assigned_scope_and_build_bound_evidence_checked",
+      "manager_file_subscription_status_read_back",
+      "retry_after_uncertain_reply_requires_original_receipt_for_the_registered_marker"
     ],
     "not_validated": [
-      "production_project_deployment_and_scheduler_handoff",
-      "long_term_free_allowance"
+      "full_production_scheduler_handoff",
+      "long_term_free_allowance",
+      "production_websocket_delivery_from_a_file_manager_subscription"
     ],
     "target_linux_installed": false,
-    "installation_note": "The dedicated assistant features were checked on a test copy. Switching an existing project requires its own verification."
+    "installation_note": "Release verification and project activation are separate. Each project supplies its own test and deployment evidence."
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

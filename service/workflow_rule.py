@@ -72,6 +72,29 @@ def private_registry(config, paths):
     return data['rules']
 
 
+def marker_watch(config, paths, table_id, table):
+    """Select only this project's explicitly registered marker field and finite values."""
+    if bridge.load(config['runner_config']).get('native_stage_mode') != 'registered_requests':
+        return table
+    try:
+        registry = private_registry(config, paths)
+        fields = {}
+        for rule in registry.values():
+            if rule.get('purpose') != STAGE_REQUEST or rule.get('table_id') != table_id:
+                continue
+            checked_rule(rule)
+            guard = {'kind': 'project_link', 'field_id': table['project_field'], 'value': config['project_record_id']}
+            if (rule['guard'] != guard or rule['authored_by'] != config['bot_open_id']
+                    or table['fields'].get(rule['stage_field_id']) != 'status' or not rule.get('definition_sha256')):
+                continue
+            fields.setdefault(rule['marker_field_id'], set()).add(rule['marker_text'])
+        if fields:
+            return dict(table, fields={k: bridge.gate_events.ASSISTANT_MARKER for k in fields}, marker_values=fields)
+    except (KeyError, OSError, ValueError, TypeError, AttributeError):
+        pass  # Missing or invalid enrollment cannot create a marker receipt.
+    return table
+
+
 def checked_rule(rule):
     if rule.get('purpose') == 'project_scope':
         need(

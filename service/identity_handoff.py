@@ -3,7 +3,8 @@
 
 Run unattended.py scan on the unscheduled bot candidate first. Preview with
 --source OLD --candidate NEW; repeat with --apply <preview digest> to freeze both
-runners and prepare the new state. No cron edits, Feishu calls or workers here.
+runners and prepare the new state. Registered requests additionally verify the
+six live workflow definitions. No schedule changes or worker starts here.
 """
 import argparse
 import ctypes
@@ -52,6 +53,38 @@ def require_full_scan(snapshot, binding, *, browser=False):
             'Scan does not verify the configured identity, reader and full project scope.')
 
 
+def require_registered_scan(previous, current, config, binding):
+    # The previous reader verified the native configuration. The new one verifies
+    # visible stages plus the six explicitly delegated workflows independently.
+    import stage_contract
+    policy = runtime.registered_requests.selected(config, binding, verify_live=True)
+    expected = runtime.watch.scan_coverage(binding)
+    expected.update(native_stage_inspection={'node_settings_verified': False, 'dispatch_verified': False},
+                    execution_scope=policy)
+    require(type(current.get('format_version')) is int and current['format_version'] == 1
+            and current.get('binding') == runtime.comments.binding_identity(binding)
+            and current.get('coverage') == expected, 'The candidate did not scan under the registered workflow policy.')
+    roles = ('requirements', 'bugs', 'work')
+    inspected = current.get('native_stage_inspection', {})
+    keys = set()
+    for role in roles:
+        table = binding['tables'][role]
+        fields = table['fields']
+        status = fields['status']
+        key = table['id'] + '/' + status['id']
+        native = previous.get('stage_fields', {}).get(key, {})
+        contract = status['stage_contract']
+        require(native.get('id') == status['id'] and not stage_contract.problems(native, contract, fields),
+                'The original checkpoint does not verify the human and AI steps for ' + role + '.')
+        info = inspected.get(key, {})
+        options = [s['name'] for s in contract['steps']] + [contract['done'], contract['cancelled']]
+        require(info.get('native_type') == 24 and info.get('ui_type') == 'Stage'
+                and info.get('cli_type') in ('stage', 'select') and info.get('options') == options,
+                'The live stage projection differs for ' + role + '.')
+        keys.add(key)
+    require(set(inspected) == keys, 'The delegated policy covers exactly three native stage fields.')
+
+
 def preview(old, new, reviewed_at):
     source_dir, target_dir = (Path(config['state_dir']) for config in (old, new))
     require(not any(os.path.lexists(target_dir / name) for name in (
@@ -84,11 +117,15 @@ def preview(old, new, reviewed_at):
     previous = runtime.run_context.checkpoint_snapshot(source_dir, state)
     require(previous is not None, 'Original checkpoint cannot be verified.')
     require_full_scan(previous, source_binding, browser=old['format_version'] == 2)
-    require('native_stage_mode' not in new, 'Preparation-only runners cannot take over the full workflow.')
+    require(new.get('native_stage_mode') in (None, runtime.registered_requests.MODE),
+            'Preparation-only runners cannot take over the full workflow.')
     scan_file = target_dir / 'last-scan.json'
     require(0 <= reviewed_at - scan_file.stat().st_mtime <= 1800, 'Run a fresh candidate scan (within 30 minutes).')
     current = runtime.read_json(scan_file)
-    require_full_scan(current, target_binding)
+    if new.get('native_stage_mode') == runtime.registered_requests.MODE:
+        require_registered_scan(previous, current, new, target_binding)
+    else:
+        require_full_scan(current, target_binding)
     journal = runtime.comments.load_state(target_dir / 'comments-state.json', target_binding)
     require(journal.get('last_full_reconciliation'), 'No completed full comment scan under the new identity.')
     for field in ('records', 'comments'):
