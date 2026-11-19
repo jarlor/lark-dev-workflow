@@ -72,6 +72,8 @@ sh /path/to/lark-dev-workflow/scripts/unattended.sh scan --config /path/to/runne
 
 这会读全项目记录和评论，核对原生字段类型、可见状态和绑定时的顺序。结果单独保存在执行器状态目录的 `native-stage-inspection/`。已配对组织时，这次检查也会为本项目的记录登记事件范围。读到一条人点过的记录后，再按下文核实是谁点的、确认了哪一版。身份交接、绑定迁移和自动派工仍使用完整检查。
 
+希望同一个 Linux 执行器先处理反馈、写计划时，在已配对组织的专用助手运行配置中设置 `"native_stage_mode": "prepare"`。把本项目的服务配置和下方确认工具的实际路径写进已有项目规则，方便执行器核对人的点击。沿用同一个服务和 `tick` 入口。它会把这类运行的会话和处理进度单独保存。项目原来的只读或暂停要求继续生效。可处理到哪一步，见 [只处理反馈和计划](../skill/lark-dev-workflow/references/assistant-identity.md#只处理反馈和计划)。
+
 用一条测试研发项验证计划确认。助手填入第 1 版计划，指定的人点「完成节点」。用助手身份对这条记录运行 `lark-cli base +record-history-list`，核对记录、前后状态、实际操作人和当时的计划。单条历史需要 `base:history:read`。历史只返回姓名时，按[执行器的核对方法](../skill/lark-dev-workflow/references/unattended-worker.md)对照本次事件和现有修订；缺少确切依据或计划已改时继续等待。测试时分别验证真人点节点和自动化改节点，区分谁完成了哪一步。[飞书记录历史命令](https://github.com/larksuite/cli/blob/v1.0.98/shortcuts/base/record_history_list.go) · [飞书记录变更事件](https://open.feishu.cn/document/docs/bitable-v1/events/bitable_record_changed)
 
 ### 核对刚收到的一次确认
