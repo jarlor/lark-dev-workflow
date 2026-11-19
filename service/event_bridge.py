@@ -8,6 +8,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import pwd
 import re
 import signal
 import sqlite3
@@ -496,6 +497,19 @@ def tick_status(stream, returncode):
     return status if status in ('ran', 'unchanged', 'busy', 'paused', 'recovery_required') else 'unknown'
 
 
+def worker_environment():
+    env = {key: value for key, value in os.environ.items()
+           if key not in ('FEISHU_APP_SECRET', 'CREDENTIALS_DIRECTORY')}
+    if not env.get('HOME'):
+        try:
+            env['HOME'] = pwd.getpwuid(os.geteuid()).pw_dir
+        except KeyError:
+            raise OSError('Service account has no registered home directory.') from None
+    if not absolute(env['HOME']):
+        raise OSError('Service account home must be an absolute directory.')
+    return env
+
+
 def supervise(path, config, journal):
     stop = False
     def request_stop(*_):
@@ -543,11 +557,10 @@ def supervise(path, config, journal):
                         argv = [config['runner_config'] if arg == '{runner_config}' else arg
                                 for arg in config['tick_argv']]
                         output = tempfile.TemporaryFile()
-                        env = {key: val for key, val in os.environ.items()
-                               if key not in ('FEISHU_APP_SECRET', 'CREDENTIALS_DIRECTORY')}
                         try:
                             worker = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output,
-                                                      stderr=subprocess.DEVNULL, cwd=expected[0], env=env)
+                                                      stderr=subprocess.DEVNULL, cwd=expected[0],
+                                                      env=worker_environment())
                         except OSError:
                             output.close()
                             output = None

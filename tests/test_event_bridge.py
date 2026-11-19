@@ -4,6 +4,7 @@ import json
 import multiprocessing
 import os
 from pathlib import Path
+import pwd
 import subprocess
 import sys
 import tempfile
@@ -224,14 +225,26 @@ class EventBridgeTests(unittest.TestCase):
             handler._do_without_validation(json.dumps(envelope).encode())
         self.assertEqual(self.journal.status()['received'], 3)
 
-    def test_supervisor_reconciles_with_failed_socket_and_does_not_relay_credentials(self):
+    def test_supervisor_keeps_configured_worker_home(self):
+        supplied_home = self.root / 'service-home'
+        supplied_home.mkdir()
+        self.assert_worker_environment(str(supplied_home), str(supplied_home))
+
+    def test_supervisor_sets_missing_worker_home_from_its_effective_uid(self):
+        self.assert_worker_environment(None, pwd.getpwuid(os.geteuid()).pw_dir)
+
+    def assert_worker_environment(self, supplied_home, expected_home):
         worker = self.root / 'test_tick.py'
         worker.write_text("import os,sys, pathlib, json\n"
                           "assert 'FEISHU_APP_SECRET' not in os.environ and 'CREDENTIALS_DIRECTORY' not in os.environ\n"
-                          "pathlib.Path('tick-log').write_text(sys.argv[1])\n"
+                          "pathlib.Path('tick-log').write_text(json.dumps([sys.argv[1], os.environ['HOME']]))\n"
                           "print(json.dumps({'status':'unchanged'}))\n")
         self.set_dispatch([sys.executable, str(worker), '{runner_config}'])
         env = dict(os.environ, FEISHU_APP_SECRET='fixture', CREDENTIALS_DIRECTORY=str(self.root / 'missing'))
+        if supplied_home is None:
+            env.pop('HOME', None)
+        else:
+            env['HOME'] = supplied_home
         with subprocess.Popen([sys.executable, str(SERVICE / 'event_bridge.py'), 'listen',
                               '--config', str(self.config_path)], env=env, stdout=subprocess.DEVNULL,
                               stderr=subprocess.DEVNULL) as supervisor:
@@ -240,7 +253,7 @@ class EventBridgeTests(unittest.TestCase):
                 while self.journal.status()['last_tick_status'] == 'never' and time.monotonic() < deadline:
                     time.sleep(.1)
                 self.assertEqual(self.journal.status()['last_tick_status'], 'unchanged')
-                self.assertEqual((self.root / 'tick-log').read_text(), str(self.runner))
+                self.assertEqual(json.loads((self.root / 'tick-log').read_text()), [str(self.runner), expected_home])
                 self.assertIsNone(supervisor.poll())
             finally:
                 supervisor.terminate()
