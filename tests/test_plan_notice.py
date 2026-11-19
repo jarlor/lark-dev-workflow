@@ -1,4 +1,5 @@
 import copy
+import fcntl
 import json
 from pathlib import Path
 import subprocess
@@ -9,6 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'service'))
 import plan_notice as notice
+import deferred_notices
 
 
 class PlanNoticeTests(unittest.TestCase):
@@ -20,7 +22,33 @@ class PlanNoticeTests(unittest.TestCase):
                                  signature='bound', config={'app_id': 'cli_demo'})
         self.view = {'id': 'vewPlan', 'name': '待确认计划', 'type': 'grid'}
         self.project.tables = {'work': {'id': 'tblWork', 'views': [self.view],
-                                        'fields': {'plan': {'name': '研发计划'}}}}
+                                        'fields': {'plan': {'name': '研发计划'}, 'status': {'id': 'fldStage'},
+                                                   'project': {'id': 'fldProject'}}}}
+        self.now = 1700000000
+        clock = mock.patch.object(notice.time, 'time', return_value=self.now)
+        clock.start()
+        self.addCleanup(clock.stop)
+        p = self.project
+        p.config.update(tenant_key='org', state_dir=temp.name, table_ids=['tblWork'], base_token=p.token,
+                        project_record_id=p.project, bot_open_id=p.open_id, lark_profile='dedicated',
+                        runner_config=str(p.directory / 'runner.json'))
+        p.binding = dict(base={'token': p.token}, tables=p.tables, scope={'project_record_id': p.project},
+                         cli_actor={'identity': 'bot', 'open_id': p.open_id})
+        p.paths = tuple(str(p.directory / name) for name in ('workdir', 'runner-state', 'binding.json'))
+        Path(p.paths[1]).mkdir()
+        with mock.patch.object(notice.plan.bridge, 'runner_pins', return_value=p.paths):
+            self.journal = notice.plan.bridge.Journal(p.config)
+        self.index = dict(signature=notice.gate_events.signature(p.binding, 'org'), started_at=self.now-5,
+                          observed_at=self.now-4, tables={'tblWork': dict(records=['recWork'],
+                          project_field='fldProject', native_stage_field_id='fldStage', fields={'fldStage':'status'},
+                          since={'recWork': self.now-4})})
+        self.scope_file = Path(p.paths[1]) / notice.gate_events.INDEX
+        self.scope_file.write_text(json.dumps(self.index))
+        self.receiver = (p.directory / 'receiver.lock').open('w+b')
+        self.addCleanup(self.receiver.close)
+        fcntl.flock(self.receiver, fcntl.LOCK_EX)
+        self.receiver.write(str(self.now-10).encode())
+        self.receiver.flush()
         self.project.reader.base.pages.return_value = [self.view.copy()]
         self.project.reader.profile = 'dedicated'
         self.work = dict(requirements=[{'id':'recRequirement'}], project=[{'id':'recProject'}],
@@ -90,6 +118,123 @@ class PlanNoticeTests(unittest.TestCase):
         self.get_prepared.assert_called_with(self.project.path, 'recRequirement', project=self.project)
         self.directory.assert_called_with(self.project.reader, 'ou_person')
         self.assertEqual(len(list(self.project.directory.glob('*.verified'))), 1)
+
+    def test_wait_for_new_row_then_send_original_notice_once(self):
+        scope = copy.deepcopy(self.index)
+        scope['tables']['tblWork']['records'] = []
+        self.scope_file.write_text(json.dumps(scope))
+        self.assertEqual(self.invoke()['status'], 'pending')
+        request_file, = (self.project.directory / 'pending-plan-notices').glob('*.json')
+        request = json.loads(request_file.read_text())
+        self.assertEqual(request_file.stat().st_mode & 0o777, 0o600)
+        self.assertEqual((request['confirmer'], request['anchor']), ('ou_person', self.anchor))
+        self.assertEqual(self.sends, 0)
+        self.scope_file.write_text(json.dumps(self.index))
+        self.assertEqual(notice.run(self.project.path, 'recWork', 'ou_person', 1,
+                                    expected_request=dict(request, contents='other'))['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+        result = notice.run(self.project.path, 'recWork', 'ou_person', 1, expected_request=request)
+        self.assertEqual(result['status'], 'notified', result)
+        self.assertFalse(request_file.exists())
+        self.assertEqual(self.sends, 1)
+        fcntl.flock(self.receiver, fcntl.LOCK_UN)
+        self.assertEqual(self.invoke(), result)
+        self.assertEqual(self.sends, 1)
+
+    def test_wrong_or_stale_scope_and_same_second_never_send(self):
+        for mutate in (lambda s: s.update(signature='other'),
+                       lambda s: s.update(started_at=self.now-100000, observed_at=self.now-90000),
+                       lambda s: s['tables']['tblWork'].update(native_stage_field_id='other'),
+                       lambda s: s['tables']['tblWork'].update(project_field='other'),
+                       lambda s: s['tables']['tblWork'].update(fields={'fldStage':'revision'}),
+                       lambda s: (s.update(observed_at=self.now), s['tables']['tblWork']['since'].update(recWork=self.now))):
+            scope = copy.deepcopy(self.index)
+            mutate(scope)
+            self.scope_file.write_text(json.dumps(scope))
+            self.assertEqual(self.invoke()['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+
+    def test_barriers_must_allow_an_immediate_click(self):
+        for table, record, closed, opened in (('', '', self.now-3, None), ('tblWork', 'recWork', self.now-3, None),
+                                             ('', '', self.now-2, self.now)):
+            with self.journal.connect() as db:
+                db.execute('DELETE FROM membership_barriers')
+                db.execute('INSERT INTO membership_barriers VALUES (?,?,?,?)', (table, record, closed, opened))
+            self.assertEqual(self.invoke()['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+        with self.journal.connect() as db:
+            db.execute('UPDATE membership_barriers SET closed_at=?, reopened_at=NULL', (self.now-6,))
+        self.assertEqual(self.invoke()['status'], 'notified')
+
+    def test_only_current_locked_receiver_and_bound_journal_can_trigger_invitation(self):
+        self.receiver.seek(0)
+        self.receiver.truncate()
+        self.receiver.write(str(self.now).encode())
+        self.receiver.flush()
+        self.assertEqual(self.invoke()['status'], 'pending')
+        fcntl.flock(self.receiver, fcntl.LOCK_UN)
+        self.receiver.seek(0)
+        self.receiver.write(str(self.now-3).encode())
+        self.receiver.flush()
+        self.assertEqual(self.invoke()['status'], 'pending')
+        fcntl.flock(self.receiver, fcntl.LOCK_EX)
+        with self.journal.connect() as db:
+            db.execute("UPDATE writer SET binding='foreign'")
+        self.assertEqual(self.invoke()['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+
+    def test_deferred_send_preserves_original_project_notification_rules(self):
+        self.project.binding['governance'] = {'rules_reference': 'rules.md'}
+        self.index['signature'] = notice.gate_events.signature(self.project.binding, 'org')
+        self.scope_file.write_text(json.dumps(self.index))
+        rules = Path(self.project.directory / 'rules.md')
+        rules.write_text('本测试允许在计划下提醒负责人。')
+        self.project.runner = {'workdir': str(self.project.directory)}
+        with mock.patch.object(notice.unattended.control, 'actor_for_runner'):
+            fcntl.flock(self.receiver, fcntl.LOCK_UN)
+            self.assertEqual(self.invoke()['status'], 'pending')
+            request_file, = (self.project.directory / 'pending-plan-notices').glob('*.json')
+            request = json.loads(request_file.read_text())
+            rules.write_text('暂停所有新通知。')
+            fcntl.flock(self.receiver, fcntl.LOCK_EX)
+            result = notice.run(self.project.path, 'recWork', 'ou_person', 1, expected_request=request)
+            self.assertEqual(result['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+        self.assertEqual(json.loads(request_file.read_text()), request)
+
+    def test_next_scan_delivers_previously_requested_notice_without_a_model_or_duplicate(self):
+        self.scope_file.unlink()
+        self.assertEqual(self.invoke()['status'], 'pending')
+        self.assertEqual(self.sends, 0)
+        p = self.project
+        p.config['mode'] = 'dispatch'
+        p.runner = dict(state_dir=p.paths[1], workdir=p.paths[0], native_stage_mode='prepare')
+        runtime = notice.unattended.execution_directory(p.runner)
+        runtime.mkdir()
+        (runtime / 'state.json').write_text(json.dumps(dict(format_version=1, identity='test', checkpoint='scan')))
+        pin = deferred_notices.binding_pin(p.config, p.paths)
+        self.scope_file.write_text(json.dumps(self.index))
+        with mock.patch.object(notice.plan.bridge, 'config_from', return_value=p.config), \
+                mock.patch.object(notice.plan.bridge, 'runner_pins', return_value=p.paths), \
+                mock.patch.object(notice.unattended, 'identity', return_value='test'):
+            with notice.unattended.lock_workspace(p.runner):
+                self.assertEqual(deferred_notices.retry_one(p.path, pin), 'busy')
+            self.assertEqual(deferred_notices.retry_one(p.path, 'wrong'), 'binding_changed')
+            self.assertEqual(self.sends, 0)
+            self.assertEqual(deferred_notices.retry_one(p.path, pin), 'notified')
+            self.assertEqual(deferred_notices.retry_one(p.path, pin), 'empty')
+        self.assertEqual((self.sends, self.readbacks), (1, 1))
+
+    def test_stale_queued_invitation_cannot_be_retargeted(self):
+        fcntl.flock(self.receiver, fcntl.LOCK_UN)
+        self.assertEqual(self.invoke()['status'], 'pending')
+        request_file, = (self.project.directory / 'pending-plan-notices').glob('*.json')
+        original = request_file.read_bytes()
+        fcntl.flock(self.receiver, fcntl.LOCK_EX)
+        self.work['plan'] = self.prepared['values']['plan'] = '读回的是别的内容'
+        self.assertEqual(self.invoke()['status'], 'pending')
+        self.assertEqual(request_file.read_bytes(), original)
+        self.assertEqual(self.sends, 0)
 
     def test_rejects_changed_work_or_missing_prepared_before_preview(self):
         for k, new in [('project',[{'id':'recOther'}]), ('requirements', []), ('plan_confirmer',[{'id':'ou_other'}]),

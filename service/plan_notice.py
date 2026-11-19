@@ -1,15 +1,24 @@
 #!/usr/bin/env python3
 """Post one native record comment for a prepared plan, then verify it by ID."""
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 from pathlib import Path
 import re
+import sqlite3
+import stat
 import subprocess
+import time
 
 import prepare_plan as plan
+import gate_events
+import unattended
 from identity_handoff import sync_directory
 
+
+WAIT_FOR_RECEIVER = '计划已写好。助手正在准备接收这条研发项的确认，准备好后会发提醒。'
 
 def fixed_view(project):
     table = project.tables['work']
@@ -72,7 +81,74 @@ def persist(path, value):
     sync_directory(path.parent)
 
 
-def notify(project, record, person, revision):
+def require_capture_ready(project, table_id, record):
+    """Check the receiver's actual membership and epoch immediately before a new invitation."""
+    now = int(time.time())
+    scope = plan.bridge.load(Path(project.paths[1]) / gate_events.INDEX)
+    started, observed = scope.get('started_at'), scope.get('observed_at')
+    plan.check(scope.get('signature') == gate_events.signature(project.binding, project.config['tenant_key'])
+               and type(started) is int and type(observed) is int and 0 < started <= observed <= now
+               and observed >= now - gate_events.MAX_AGE, WAIT_FOR_RECEIVER)
+    table = scope['tables'].get(table_id, {})
+    fields = project.tables['work']['fields']
+    field_id = fields['status']['id']
+    since = table.get('since', {}).get(record)
+    plan.check(table_id in project.config['table_ids'] and record in table.get('records', [])
+               and table.get('project_field') == fields['project']['id']
+               and table.get('fields', {}).get(field_id) == 'status'
+               and table.get('native_stage_field_id') == field_id and type(since) is int
+               and 0 < since <= observed and since < now, WAIT_FOR_RECEIVER)
+
+    database = project.directory / 'hints.sqlite'
+    metadata = database.lstat()
+    plan.check(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.geteuid(), WAIT_FOR_RECEIVER)
+    with contextlib.closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True, timeout=5)) as db:
+        db.execute('BEGIN')
+        plan.check(db.execute('SELECT identity FROM state WHERE singleton=1').fetchone() ==
+                   (plan.bridge.journal_identity(project.config),) and
+                   db.execute('SELECT binding FROM writer WHERE singleton=1').fetchone() ==
+                   (plan.bridge.writer_identity(project.config['runner_config'], project.paths),), WAIT_FOR_RECEIVER)
+        barriers = db.execute('SELECT closed_at,reopened_at FROM membership_barriers WHERE '
+                              "(table_id=? AND record_id=?) OR (table_id='' AND record_id='')", (table_id, record))
+        for closed, reopened in barriers:
+            # The receiver reopens a closed barrier on the next event only after a later full scan.
+            plan.check(type(closed) is int and 0 < closed <= now, WAIT_FOR_RECEIVER)
+            if reopened is None:
+                plan.check(started > closed and observed < now, WAIT_FOR_RECEIVER)
+            else:
+                plan.check(type(reopened) is int and closed < reopened < now, WAIT_FOR_RECEIVER)
+    lock = os.open(project.directory / 'receiver.lock', os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(lock, 'rb') as handle:
+        metadata = os.fstat(handle.fileno())
+        plan.check(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.geteuid(), WAIT_FOR_RECEIVER)
+        try:
+            fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+        except BlockingIOError:
+            epoch = handle.read(32).strip()
+            plan.check(re.fullmatch(rb'[0-9]{1,20}', epoch) and 0 < int(epoch) < now, WAIT_FOR_RECEIVER)
+        else:
+            raise plan.Conflict(WAIT_FOR_RECEIVER)
+
+
+def pending_file(project, key):
+    directory = project.directory / 'pending-plan-notices'
+    if not directory.exists():
+        directory.mkdir(mode=0o700, exist_ok=True)
+        sync_directory(project.directory)
+    metadata = directory.lstat()
+    plan.check(stat.S_ISDIR(metadata.st_mode) and metadata.st_uid == os.geteuid() and not metadata.st_mode & 0o077,
+               '待发提醒的目录不属于当前服务或权限不符。')
+    return directory / (key + '.json')
+
+
+def requested_notice(project, intent):
+    if 'rules_reference' not in project.binding.get('governance', {}):
+        return intent
+    _, rule_file = unattended.project_governance(project.runner, project.binding)
+    return dict(intent, contents=plan.digest([intent['contents'], rule_file]))
+
+
+def notify(project, record, person, revision, *, expected_request=None):
     project.unchanged()
     work = project.row('work', record)
     requirements = plan.ids(work['requirements'])
@@ -103,6 +179,16 @@ def notify(project, record, person, revision):
     intent = {'binding': project.signature, 'anchor': anchor, 'revision': revision, 'confirmer': person,
               'contents': plan.digest([prepared['values'], message])}
     with plan.bridge.exclusive(prefix.with_suffix('.lock')):
+        requested = requested_notice(project, intent)
+        request = pending_file(project, key)
+        queued = os.path.lexists(request)
+        if queued:
+            metadata = request.lstat()
+            plan.check(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.geteuid()
+                       and not metadata.st_mode & 0o077 and plan.bridge.load(request) == requested,
+                       '待发提醒对应的计划、接收人或位置已变。')
+        if expected_request is not None:
+            plan.check(queued and expected_request == requested, '没有找到与原申请一致的待发提醒。')
         if os.path.lexists(intent_file):
             plan.check(plan.bridge.load(intent_file) == intent, '这版计划已有发出记录，但接收人、内容或位置有变化。')
             plan.check(accepted_file.exists(), '这版提醒已尝试发送，尚未拿到评论编号。请到本研发项查看。')
@@ -112,6 +198,13 @@ def notify(project, record, person, revision):
             validate_preview(project, drive(project, '+add-comment', args, preview=True), anchor, person, message)
             plan.check(project.row('work', record) == work, '发送前研发项有变化，请重新核对。')
             project.unchanged()
+            plan.check(requested_notice(project, intent) == requested, '发送前项目规则有变化，请重新核对。')
+            if not queued:
+                persist(request, requested)
+            try:
+                require_capture_ready(project, table, record)
+            except (OSError, sqlite3.Error, KeyError, TypeError, json.JSONDecodeError) as exc:
+                raise plan.Conflict(WAIT_FOR_RECEIVER) from exc
             persist(intent_file, intent)
             data = drive(project, '+add-comment', args)
             plan.check(data.get('file_token') == project.token and data.get('file_type') == 'bitable'
@@ -125,18 +218,22 @@ def notify(project, record, person, revision):
         if not verified_file.exists():
             persist(verified_file, receipt)
         plan.check(plan.bridge.load(verified_file) == receipt, '提醒回执有冲突，请先核对。')
+        if os.path.lexists(request):
+            plan.check(plan.bridge.load(request) == requested, '待发提醒与已核实的评论不符。')
+            request.unlink()
+            sync_directory(request.parent)
     return {'status': 'notified', 'record_id': record, 'plan_revision': revision, **receipt}
 
 
-def run(path, record, confirmer, revision):
+def run(path, record, confirmer, revision, *, expected_request=None):
     try:
         plan.check(re.fullmatch(r'rec[A-Za-z0-9]+', record) and re.fullmatch(r'ou_[A-Za-z0-9_]{1,128}', confirmer)
                    and type(revision) is int and 0 < revision < 2**53, '请提供完整的研发项编号、人员编号和修订号。')
-        return notify(plan.Project(path), record, confirmer, revision)
+        return notify(plan.Project(path), record, confirmer, revision, expected_request=expected_request)
     except (plan.Conflict, plan.confirmation.Pending) as exc:
         reason = str(exc)
-    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, subprocess.SubprocessError,
-            plan.OnboardingError, plan.control.ControlError):
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, subprocess.SubprocessError, sqlite3.Error,
+            plan.OnboardingError, plan.control.ControlError, unattended.RunnerError):
         reason = '尚未核实这版提醒的发送结果。已尝试发送的提醒会保留，供下次核对。'
     return {'status': 'pending', 'reason': reason, 'record_id': record, 'plan_revision': revision}
 

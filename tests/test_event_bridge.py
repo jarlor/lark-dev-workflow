@@ -63,6 +63,48 @@ class EventBridgeTests(unittest.TestCase):
             to_user_id={'open_id': 'ou_assistant'}, notice_type='add_reply'))
         return envelope
 
+    def test_receiver_publishes_its_own_epoch_under_the_active_lock(self):
+        path = Path(self.config['state_dir']) / 'receiver.lock'
+        path.write_text('12345678901234567890\n')
+        def check_lease(config, journal):
+            self.assertEqual(path.read_text(), f'{journal.started_at}\n')
+            with self.assertRaises(ValueError), bridge.exclusive(path):
+                self.fail('Multiple receivers acquired the same lease')
+        with mock.patch.object(sys, 'argv', ['bridge', '_receive', '--config', str(self.config_path)]), \
+                mock.patch.object(bridge, 'socket_client', side_effect=check_lease) as client:
+            previous = os.umask(0o077)
+            try:
+                self.assertEqual(bridge.main(), 0)
+            finally:
+                os.umask(previous)
+        client.assert_called_once()
+        with bridge.exclusive(path):
+            pass
+
+    def test_deferred_delivery_runs_after_success_only_and_reuses_installed_package(self):
+        listener = mock.Mock()
+        listener.poll.return_value = None
+        pins = (str(self.root), str(self.root / 'runner-state'), str(self.binding))
+        def after(status):
+            return bridge.retry_after_tick(self.config_path, self.config, pins, status, listener)
+        with mock.patch.object(bridge.subprocess, 'Popen') as start, \
+                mock.patch.object(bridge, '__file__', str(self.root / 'custom-entry.py')), \
+                mock.patch.dict(os.environ, {'FEISHU_APP_SECRET': 'test-only'}):
+            self.assertIsNone(after('unchanged'))
+            queue = Path(self.config['state_dir']) / 'pending-plan-notices'
+            queue.mkdir(mode=0o700)
+            (queue / ('a' * 64 + '.json')).touch(mode=0o600)
+            for status in ('paused', 'recovery_required', 'busy', 'failed'):
+                self.assertIsNone(after(status))
+            listener.poll.return_value = 1
+            self.assertIsNone(after('ran'))
+            start.assert_not_called()
+            listener.poll.return_value = None
+            self.assertIs(after('unchanged'), start.return_value)
+            command, = start.call_args.args
+            self.assertEqual(command[1], str(SERVICE / 'deferred_notices.py'))
+            self.assertNotIn('FEISHU_APP_SECRET', start.call_args.kwargs['env'])
+
     def test_target_other_app_table_tenant_assistant_and_false_notices_are_filtered(self):
         changes = [(('header', 'app_id'), 'other'), (('header', 'tenant_key'), 'other'),
                    (('header', 'event_type'), 'im.message.receive_v1'), (('event', 'file_token'), 'other'),

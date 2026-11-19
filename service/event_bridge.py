@@ -21,6 +21,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skill/lark-dev-workflow/scripts'))
 import gate_events
 from onboard import atomic_json
+import deferred_notices
 
 
 RECORD = 'drive.file.bitable_record_changed_v1'
@@ -465,7 +466,7 @@ def exclusive(path):
             fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise ValueError('Another service owns this project or state directory.') from None
-        yield
+        yield stream
 
 
 class Schedule:
@@ -510,6 +511,21 @@ def worker_environment():
     return env
 
 
+def retry_after_tick(path, config, paths, status, listener):
+    if status not in ('ran', 'unchanged') or listener is None or listener.poll() is not None:
+        return None
+    try:
+        if next(deferred_notices.requests(config['state_dir']), None) is None:
+            return None
+        return subprocess.Popen([sys.executable, str(Path(deferred_notices.__file__).resolve()),
+                                 '--config', str(path), '--pin', deferred_notices.binding_pin(config, paths)],
+                                cwd=paths[0], env=worker_environment(), stdin=subprocess.DEVNULL,
+                                stdout=subprocess.DEVNULL)
+    except (OSError, ValueError):
+        print('Deferred plan reminder could not start; the original request is preserved.', file=sys.stderr, flush=True)
+        return None
+
+
 def supervise(path, config, journal):
     stop = False
     def request_stop(*_):
@@ -519,7 +535,7 @@ def supervise(path, config, journal):
         signal.signal(sig, request_stop)
     expected = runner_pins(config) if config['mode'] == 'dispatch' else None
     schedule = Schedule(config)
-    listener, worker, output = None, None, None
+    listener, worker, output, reminder = None, None, None, None
     next_socket = 0
     with contextlib.ExitStack() as locks:
         locks.enter_context(exclusive(Path(config['state_dir']) / 'listen.lock'))
@@ -540,6 +556,8 @@ def supervise(path, config, journal):
                     listener = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_receive',
                                                  '--config', str(path)], stdin=subprocess.DEVNULL,
                                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if reminder and reminder.poll() is not None:
+                    reminder = None
                 if worker and worker.poll() is not None:
                     status = tick_status(output, worker.returncode)
                     journal.finish(captured, status)
@@ -547,7 +565,9 @@ def supervise(path, config, journal):
                     output.close()
                     output, worker = None, None
                     schedule.finished(status, now)
-                if expected and worker is None:
+                    if not stop:
+                        reminder = retry_after_tick(path, config, expected, status, listener)
+                if expected and worker is None and reminder is None:
                     snapshot = journal.status()
                     if schedule.due(snapshot, now):
                         if config_from(path) != config or runner_pins(config) != expected:
@@ -569,6 +589,8 @@ def supervise(path, config, journal):
                             print('Failed to start the configured tick; will retry.', file=sys.stderr, flush=True)
                 time.sleep(1)
         finally:
+            if reminder:
+                reminder.wait()
             if listener and listener.poll() is None:
                 listener.terminate()
                 try:
@@ -608,7 +630,12 @@ def main():
         if args.command == 'status':
             print(json.dumps({'mode': config['mode'], **journal.status()}))
         elif args.command == '_receive':
-            with exclusive(Path(config['state_dir']) / 'receiver.lock'):
+            with exclusive(Path(config['state_dir']) / 'receiver.lock') as lease:
+                # gate_changes only accepts clicks later than this receiver's start second.
+                lease.seek(0)
+                lease.truncate()
+                lease.write(f'{journal.started_at}\n')
+                lease.flush()
                 socket_client(config, journal)
         else:
             supervise(path, config, journal)
