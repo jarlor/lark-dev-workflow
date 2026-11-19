@@ -233,6 +233,13 @@ class EventBridgeTests(unittest.TestCase):
     def test_supervisor_sets_missing_worker_home_from_its_effective_uid(self):
         self.assert_worker_environment(None, pwd.getpwuid(os.geteuid()).pw_dir)
 
+    def test_missing_home_resolves_effective_uid_even_with_other_login_names(self):
+        with mock.patch.dict(os.environ, {'USER': 'someone-else', 'LOGNAME': 'someone-else'}, clear=True), \
+                mock.patch.object(os, 'geteuid', return_value=54321), \
+                mock.patch.object(pwd, 'getpwuid', return_value=mock.Mock(pw_dir='/home/service')) as lookup:
+            self.assertEqual(bridge.worker_environment()['HOME'], '/home/service')
+            lookup.assert_called_once_with(54321)
+
     def assert_worker_environment(self, supplied_home, expected_home):
         worker = self.root / 'test_tick.py'
         worker.write_text("import os,sys, pathlib, json\n"
