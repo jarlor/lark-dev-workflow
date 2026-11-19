@@ -100,10 +100,42 @@ def owner_transition(project, row, record, step, item, material=None):
     confirmation.match_history(event, [item], field, row['owner'][0]['name'], set(), (source, target))
 
 
+def authorized_owner_handoff(project, record, row, proof, item):
+    import stage_source
+    require(stage_source.location(project) is not None, '负责人变了，需要核对这次交接的授权和飞书记录。')
+    material = stage_source.query(project, 'owner_handoff', 'work', record)
+    owner_field = project.fields['owner']
+    owners = row['owner']
+    require(owner_field['type'] == 'user' and isinstance(owners, list) and len(owners) == 1
+            and owners[0].get('id') == project.bot and owners[0].get('name')
+            and material.get('method') == 'authorized_owner_handoff'
+            and (material.get('project_record_id'), material.get('table_id'), material.get('record_id'),
+                 material.get('owner_field_id'), material.get('to_open_id'), material.get('to_name')) ==
+                (project.project, project.table, record, owner_field['id'], project.bot, owners[0]['name']),
+            '交接记录与这个项目、这条研发项或当前唯一的负责人不一致。')
+    previous = material.get('from_open_id')
+    require(isinstance(previous, str) and re.fullmatch(r'ou_[A-Za-z0-9_]{1,128}', previous)
+            and previous != project.bot and isinstance(material.get('from_name'), str)
+            and material['from_name'].strip() and material['from_name'] != material['to_name']
+            and material.get('plan_confirmer_open_id') == proof['operator_open_id']
+            and all(type(material.get(k)) is int and material[k] == proof[v] for k, v in (
+                ('plan_revision', 'business_revision'), ('confirmation_table_revision', 'table_revision'),
+                ('confirmation_update_time', 'update_time'))),
+            '交接记录没有对应原负责人和这版计划的本人确认。')
+    require(material.get('history') == item and item.get('activity_type') == 'update'
+            and item.get('operator') == material['to_name'] and item['rev'] > proof['table_revision']
+            and type(item.get('create_time')) is int and item['create_time'] >= proof['update_time']
+            and len(item['field_changes']) == 1, '飞书历史没有证实这次单独的负责人交接。')
+    change = item['field_changes'][0]
+    require((change.get('field_id'), change.get('field_type'), change.get('before'), change.get('after')) ==
+            (owner_field['id'], 'User', material['from_name'], material['to_name']),
+            '飞书历史里的负责人变化与授权不同。')
+    return previous
+
+
 def record_history(project, role, record, seal, row, current_values):
     proof = seal['proof']
-    require(seal['fields'] == current_values and proof['operator_open_id'] ==
-            validate_row(project, role, row)[1], '确认后的内容、人员或归属已经不同。')
+    require(proof['operator_open_id'] == validate_row(project, role, row)[1], '计划或范围的确认人已经不同。')
     before, after, _, revision_key, _ = confirmation.GATES[role]
     require(proof['business_revision'] == row[revision_key], '上一次真实点击不属于当前版本。')
     history = project.history(record, proof['table_revision'])
@@ -121,6 +153,11 @@ def record_history(project, role, record, seal, row, current_values):
     allowed.add(project.rule['marker_field_id'])
     edges = {(source, target) for r, _, source, target in rules.STAGE_REQUESTS.values() if r == role}
     stage = after
+    owner_field = project.fields['owner']['id'] if role == 'work' else None
+    previous_owner = None
+    filed = {}
+    note_fields = {project.fields[k]['id']: k for k in ('confirmation', 'confirmed_revision', 'details')
+                   if role == 'requirements' and k in project.fields}
     for item in reversed(history[:-1]):
         changes = item.get('field_changes')
         require(item.get('activity_type') == 'update' and isinstance(changes, list) and changes,
@@ -137,11 +174,25 @@ def record_history(project, role, record, seal, row, current_values):
                                if (r, a, b) == (role, source, target))
                     owner_transition(project, row, record, key, item)
                 stage = target
+            elif fid is not None and fid == owner_field:
+                require(stage == after and previous_owner is None,
+                        '只可核对计划确认后、开工前的一次负责人交接。')
+                previous_owner = authorized_owner_handoff(project, record, row, proof, item)
+            elif fid in note_fields:
+                import confirmation_notes
+                require(fid not in filed and len(changes) == 1, '确认后的归档字段被多次修改或和其他改动混在一起。')
+                value = confirmation_notes.original_value(project, note_fields[fid], record, proof, row, change)
+                filed[fid] = '' if value is None and seal['fields'].get(fid) == '' else value
             else:
                 require(fid in allowed and fid not in current_values,
                         '确认后改过范围、计划、人员、归属或未登记的字段。即使改回也须重新确认。')
     require(row['status'] == [stage], '当前状态与确认之后的完整记录历史不同。')
-    return history[0]
+    # A seal always records the fields at the original click. A handoff never
+    # replaces that approval or changes the digest held by earlier actions.
+    approved_values = {**current_values, **filed}
+    if previous_owner is not None:
+        approved_values[owner_field] = [previous_owner]
+    return history[0], approved_values
 
 
 def capture(project, role, record, row, values):
@@ -172,45 +223,51 @@ def capture(project, role, record, row, values):
 
 
 def archived_click(project, role, record, row, values):
-    """Recheck the original event or the original, independently matched Feishu profile cards."""
+    """Recheck a native click against the original event, member cards or a prior worker archive."""
     import gate_events
     import stage_source
     material = stage_source.query(project, 'original_click', role, record)
     event = material.get('event')
     revision, person = validate_row(project, role, row)
     before, after, person_field, _, _ = confirmation.GATES[role]
-    if material.get('method') == 'official_history_profile':
-        # Some Feishu clicks predate the listener. The enrolled reader must have
-        # independently matched the original history card and this field's person
-        # card. Preserve this identity evidence separately from an original event.
+    method = material.get('method')
+    if method in ('official_history_profile', 'archived_runner_history'):
+        # An earlier worker may have seen the decision before the listener.
+        # Recheck who clicked and keep the actual source in the saved receipt.
         card_hash = material.get('history_profile_sha256')
         anchor = material.get('history')
         require(material.get('original_event_captured') is False and event is None
                 and (material.get('business_revision'), material.get('operator_open_id')) == (revision, person)
-                and isinstance(card_hash, str) and re.fullmatch(r'[a-f0-9]{64}', card_hash)
-                and card_hash == material.get('confirmer_profile_sha256')
                 and isinstance(anchor, dict) and type(anchor.get('rev')) is int and anchor['rev'] > 0
                 and type(anchor.get('create_time')) is int
                 and project.history(record, anchor['rev'])[-1] == anchor,
-                '原操作人名片与本行指定人的名片、版本或线上历史不一致。')
+                '原点击与当前的确认人、版本或飞书历史对不上。')
         steps = project.fields['status']['stage_contract']['steps']
         step = steps[0]
         require((step['actor'], step['person_field'], step['name']) == ('human', person_field, before)
                 and steps[1]['name'] == after,
                 '原项目没有绑定这个人工确认节点。')
-        confirmation.confirm_directory_user(project.reader, person)
+        if method == 'official_history_profile':
+            require(isinstance(card_hash, str) and re.fullmatch(r'[a-f0-9]{64}', card_hash)
+                    and card_hash == material.get('confirmer_profile_sha256'), '人员名片不一致。')
+            confirmation.confirm_directory_user(project.reader, person)
+        else:
+            import archived_identity
+            archived_identity.check(project, record, person_field, person, row[person_field][0]['name'], anchor, material)
         confirmation.check_history_author(anchor, row[person_field][0]['name'])
         changes = anchor.get('field_changes')
         require(anchor.get('activity_type') == 'update' and isinstance(changes, list) and len(changes) == 1
                 and changes[0].get('field_type') == 'Stage' and changes[0].get('field_id') == project.fields['status']['id']
                 and (changes[0].get('before'), changes[0].get('after')) == (before, after),
                 '官方历史未证明本人正确完成了本次确认。')
-        proof = dict(status='verified', check='official_history_profile', role=role, dispatch_checked=False,
+        proof = dict(status='verified', check=method, role=role, dispatch_checked=False,
                      content_scope='record_fields', record_id=record, table_id=project.table, field_id=changes[0]['field_id'],
                      project_record_id=project.project, business_revision=revision, operator_open_id=person,
                      event_id=None, original_event_captured=False, table_revision=anchor['rev'], update_time=anchor['create_time'])
-        return dict(proof=proof, official_profile_sha256=card_hash, source_report_sha256=material['report_sha256'],
-                    anchor=anchor, fields=values)
+        seal = dict(proof=proof, source_report_sha256=material['report_sha256'], anchor=anchor, fields=values)
+        if method == 'official_history_profile':
+            seal['official_profile_sha256'] = card_hash
+        return seal
     require(isinstance(event, dict) and material.get('business_revision') == revision
             and (event.get('operator_open_id'), event.get('table_id'), event.get('record_id'), event.get('field_id'))
             == (person, project.table, record, project.fields['status']['id'])
@@ -287,11 +344,14 @@ def confirmation_for(config_path, role, record_id):
             fresh = True
             if last and last['proof']['business_revision'] == revision:
                 try:
-                    head = record_history(project, role, record_id, last, row, values)
+                    head, original_values = record_history(project, role, record_id, last, row, values)
+                    require(last['fields'] == original_values, '确认后的内容、人员或归属已经不同。')
                     seal, fresh = last, False
                 except stage_action.Pending:
                     # A new, authentic native click may renew an invalidated approval.
                     # If material content changed, the project must identify it as a new version.
+                    if role == 'work' and last['fields'].get(fields['owner']['id']) != values[fields['owner']['id']]:
+                        raise
                     require(last['fields'] == values, '确认内容已改变，请更新版本并由指定的人重新确认。')
             if fresh:
                 try:
@@ -306,7 +366,7 @@ def confirmation_for(config_path, role, record_id):
                 require(not last or (seal['proof']['table_revision'] > last['proof']['table_revision']
                         and (not seal['proof']['event_id'] or seal['proof']['event_id'] != last['proof']['event_id'])),
                         '这次没有新的本人确认，旧确认不能恢复。')
-                head = record_history(project, role, record_id, seal, row, values)
+                head, seal['fields'] = record_history(project, role, record_id, seal, row, values)
             project.check_binding()
             require(live_row(project, record_id, fields) == row and project.history(record_id)[0] == head
                     and not os.path.lexists(Path(project.paths[1]) / 'PAUSED'),

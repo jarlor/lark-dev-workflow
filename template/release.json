@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.4.1",
+    "skill_version": "2.4.2",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -111,7 +111,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.1",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.2",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -472,33 +472,51 @@
       ],
       "target_linux_installed": false,
       "installation_note": "Release verification and project activation are separate. Each project supplies its own test and deployment evidence."
+    },
+    "2.4.1": {
+      "version": "2.4.1",
+      "date": "2026-11-20",
+      "tests": 514,
+      "environments": [
+        "Linux, Python 3.10, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)",
+        "macOS, Python 3.9, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)"
+      ],
+      "scope": [
+        "Original runner failure checked against its scheduler receipt, complete Codex turn, closed operations and matching checkpoint.",
+        "Simulated browser reads verified that new feedback remains pending and a failed or incomplete recheck cannot clear the error.",
+        "Review and atomic error archival were tested with the original workspace lock, configuration path, interrupted writes and retries.",
+        "Template structure 2.0.0 remains compatible. Existing projects keep their original binding.",
+        "A slow-loading table can finish opening within 45 seconds. The five-minute whole-scan limit and both complete passes are still required.",
+        "A live existing personal-browser project completed a full two-pass read-only preview; its execution state, checkpoint and comment index stayed byte-identical."
+      ],
+      "not_validated": [
+        "production_application_of_reconciliation",
+        "production_websocket_event_delivery",
+        "production_scheduler_cutover"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "The candidate was tested in an isolated Linux directory. No configuration or production scheduler was changed by these release checks."
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.4.1",
+  "release_version": "2.4.2",
   "skill_release_validation": {
-    "version": "2.4.1",
+    "version": "2.4.2",
     "date": "2026-11-20",
-    "tests": 514,
-    "environments": [
-      "Linux, Python 3.10, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)",
-      "macOS, Python 3.9, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)"
-    ],
     "scope": [
-      "Original runner failure checked against its scheduler receipt, complete Codex turn, closed operations and matching checkpoint.",
-      "Simulated browser reads verified that new feedback remains pending and a failed or incomplete recheck cannot clear the error.",
-      "Review and atomic error archival were tested with the original workspace lock, configuration path, interrupted writes and retries.",
-      "Template structure 2.0.0 remains compatible. Existing projects keep their original binding.",
-      "A slow-loading table can finish opening within 45 seconds. The five-minute whole-scan limit and both complete passes are still required.",
-      "A live existing personal-browser project completed a full two-pass read-only preview; its execution state, checkpoint and comment index stayed byte-identical."
+      "Explicit handoff of an approved work item to the project assistant, with matching approval revision, people, authorized transfer and single-field history.",
+      "Existing saved approvals and their digests remain valid when an authorized handoff is verified.",
+      "A changed plan, a changed confirmer, ambiguous ownership or an unsupported transfer still needs review.",
+      "Native pre-listener approval can be recovered from the original worker's click and designated person when both identities are independently linked by the same official reply.",
+      "Filing an already confirmed revision and repairing a malformed reference to the same project record preserve the original approved content.",
+      "When upgraded start checks become available, the same registered worker revisits its previous wait once. Pauses, confirmations, deadlines and retry safeguards still apply."
     ],
-    "not_validated": [
-      "production_application_of_reconciliation",
-      "production_websocket_event_delivery",
-      "production_scheduler_cutover"
-    ],
-    "target_linux_installed": false,
-    "installation_note": "The candidate was tested in an isolated Linux directory. No configuration or production scheduler was changed by these release checks."
+    "template_version": "2.0.0",
+    "tests": 531,
+    "environments": [
+      "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
+      "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
+    ]
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

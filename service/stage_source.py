@@ -78,8 +78,10 @@ def location(project):
 
 
 def query(project, kind, role, record, *, prior_step=None):
-    require(kind in ('target', 'test', 'acceptance_plan', 'original_click', 'prior_action') and role in ('requirements', 'work', 'bugs', 'verification'),
+    require(kind in ('target', 'test', 'acceptance_plan', 'original_click', 'prior_action', 'owner_handoff') and role in ('requirements', 'work', 'bugs', 'verification'),
             '没有登记这种证据查询。')
+    if kind == 'owner_handoff':
+        require(role == 'work', '只有研发项可以核对负责人交接。')
     folder = location(project)
     if folder is None:
         raise Pending('本项目尚未接入实际的测试或构建证据来源。')
@@ -125,6 +127,13 @@ def query(project, kind, role, record, *, prior_step=None):
     evidence = data['evidence']
     if kind in ('test', 'acceptance_plan', 'original_click', 'prior_action'):
         require(evidence.get('report_sha256') in hashes, '没有查到与本次原始报告摘要相同的文件。')
+    if kind == 'original_click' and evidence.get('method') == 'archived_runner_history':
+        import archived_identity
+        archived_identity.source_hashes(evidence, hashes)
+    if kind == 'owner_handoff':
+        authorization, report = evidence.get('authorization_sha256'), evidence.get('report_sha256')
+        require(authorization in hashes and report in hashes and authorization != report,
+                '缺少这次换负责人的授权记录或飞书操作回执。')
     if kind == 'test' and evidence.get('observation') == 'reproduced_failure':
         evidence['verified_input'] = evidence.get('input_sha256') in hashes
     if kind == 'target':

@@ -5,6 +5,8 @@ import sys
 from unattended_control import ControlError, load_config
 
 MODE = 'registered_requests'
+# Revision 2 can validate an authorized owner handoff after the original plan approval.
+START_CHECK_REVISION = 2
 SERVICE = Path(__file__).resolve().parents[3] / 'service'
 
 

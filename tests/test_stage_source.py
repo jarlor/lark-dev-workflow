@@ -62,6 +62,30 @@ print(json.dumps({'request': q, 'sources': [source], 'evidence': evidence}))
         with self.assertRaisesRegex(stage_action.Pending, '已变化'):
             self.run_reader()
 
+    def test_owner_handoff_is_work_only_and_requires_distinct_verified_authorization_and_report(self):
+        auth = self.reports / 'approval'
+        auth.write_bytes(b'explicit authorization for this owner change')
+        approval_hash = hashlib.sha256(auth.read_bytes()).hexdigest()
+        script = self.program.read_text().replace(
+            "evidence = {'report_sha256':", "evidence = {'authorization_sha256': %r, 'report_sha256':" % approval_hash
+        ).replace("'sources': [source]", "'sources': [source, %r]" % {'path': str(auth), 'sha256': approval_hash})
+        with mock.patch.object(source, 'admin_path'):
+            for valid in (True, False):
+                self.program.write_text(script if valid else script.replace(approval_hash, self.hash, 1))
+                self.registration['reader_sha256'] = hashlib.sha256(self.program.read_bytes()).hexdigest()
+                self.register()
+                if valid:
+                    with self.assertRaises(stage_action.Pending):
+                        self.run_reader('owner_handoff')
+                    self.assertEqual(source.query(self.project, 'owner_handoff', 'work', 'recWork')
+                                     ['authorization_sha256'], approval_hash)
+                else:
+                    with self.assertRaisesRegex(stage_action.Pending, '授权记录'):
+                        source.query(self.project, 'owner_handoff', 'work', 'recWork')
+            auth.write_bytes(b'changed')
+            with self.assertRaisesRegex(stage_action.Pending, '已变化'):
+                source.query(self.project, 'owner_handoff', 'work', 'recWork')
+
     def test_replaced_reader_service_binding_or_project_location_are_refused(self):
         self.program.write_text('raise SystemExit(99)')
         with self.assertRaisesRegex(stage_action.Pending, '读取器与登记'):

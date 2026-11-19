@@ -122,6 +122,111 @@ class ConfirmationTests(unittest.TestCase):
         self.verify.assert_not_called()
         self.receipt.assert_not_called()
 
+    def hand_over(self, *, seal_first=True):
+        import stage_source
+        p = self.p
+        old_owner = {'id': 'ou_previous', 'name': '原负责人'}
+        new_owner = {'id': p.bot, 'name': '研发助手'}
+        p.row['owner'] = [old_owner]
+        first = self.check() if seal_first else None
+        p.row['owner'] = [new_owner]
+        p.add_change('owner', old_owner['name'], new_owner['name'], new_owner['name'])
+        change = p.rows[0]
+        change['field_changes'][0]['field_type'] = 'User'
+        proof = p.proof()
+        material = dict(method='authorized_owner_handoff', project_record_id=p.project, table_id=p.table,
+                        record_id='recRow', owner_field_id=p.fields['owner']['id'],
+                        from_open_id=old_owner['id'], from_name=old_owner['name'],
+                        to_open_id=new_owner['id'], to_name=new_owner['name'],
+                        plan_confirmer_open_id=proof['operator_open_id'], plan_revision=proof['business_revision'],
+                        confirmation_table_revision=proof['table_revision'], confirmation_update_time=proof['update_time'],
+                        history=copy.deepcopy(change), authorization_sha256='a' * 64, report_sha256='b' * 64)
+        for fn, kw in [('location', {'return_value': p.directory}), ('query', {'return_value': material})]:
+            patched = mock.patch.object(stage_source, fn, **kw)
+            self.addCleanup(patched.stop)
+            patched.start()
+        return first, material
+
+    def test_authorized_owner_handoff_preserves_seal_and_subsequent_native_steps(self):
+        first, _ = self.hand_over()
+        for stage in ('可开始', '进行中', '已交付'):
+            if stage != '可开始':
+                self.p.add_change('status', self.p.row['status'][0], stage, '多维表格助手')
+                self.p.row['status'] = [stage]
+            self.assertEqual(first['confirmation_sha256'], self.check()['confirmation_sha256'])
+        book = json.loads(next((self.p.directory / 'stage-confirmations').glob('*.json')).read_text())
+        self.assertEqual(len(book['confirmations']), 1)
+        self.assertEqual(book['confirmations'][0]['fields'][self.p.fields['owner']['id']], ['ou_previous'])
+
+    def test_owner_handoff_before_first_seal_records_original_owner(self):
+        self.hand_over(seal_first=False)
+        first = self.check()
+        self.assertEqual(first['status'], 'verified')
+        self.assertEqual(first['confirmation_sha256'], self.check()['confirmation_sha256'])
+        book = json.loads(next((self.p.directory / 'stage-confirmations').glob('*.json')).read_text())
+        self.assertEqual(book['confirmations'][0]['fields'][self.p.fields['owner']['id']], ['ou_previous'])
+
+    def test_actual_archived_click_can_be_rechecked_after_handoff(self):
+        import stage_source
+        _, transfer = self.hand_over(seal_first=False)
+        original = dict(method='native_event', business_revision=self.p.row['plan_revision'],
+                        event=self.p.event(), report_sha256='a' * 64)
+        materials = {'owner_handoff': transfer, 'original_click': original}
+        self.verify.side_effect = None
+        self.verify.return_value = {'status': 'pending'}
+        with mock.patch.object(stage_source, 'query', side_effect=lambda p, kind, *args: materials[kind]), \
+                mock.patch.object(business.confirmation, 'confirm_directory_user'):
+            self.assertEqual(self.check().get('event_id'), self.p.event()['event_id'])
+            self.p.row['owner'] = [{'id': 'ou_other', 'name': '研发助手'}]
+            self.assertEqual(self.check()['status'], 'pending')
+
+    def test_missing_handoff_evidence_or_a_change_after_start_cannot_be_used(self):
+        import stage_source
+        _, transfer = self.hand_over()
+        with mock.patch.object(stage_source, 'query', side_effect=stage_action.Pending('缺少授权记录')):
+            self.assertEqual(self.check()['status'], 'pending')
+        self.p.rows.pop(0)
+        self.p.add_change('status', '可开始', '进行中', '多维表格助手')
+        self.p.add_change('owner', '原负责人', '研发助手', '研发助手')
+        self.p.rows[0]['field_changes'][0]['field_type'] = 'User'
+        transfer['history'] = copy.deepcopy(self.p.rows[0])
+        self.p.row['status'] = ['进行中']
+        self.assertEqual(self.check()['status'], 'pending')
+
+    def test_handoff_cannot_reassign_other_people_plans_or_records(self):
+        _, evidence = self.hand_over()
+        original = copy.deepcopy(evidence)
+        for key, v in dict(from_open_id='ou_wrong', to_open_id='ou_other', record_id='recOther',
+                           table_id='tblOther', project_record_id='recOther', owner_field_id='fldOther',
+                           confirmation_table_revision=4, confirmation_update_time=5, plan_revision=True,
+                           plan_confirmer_open_id='ou_other', from_name='另一人', history={}).items():
+            with self.subTest(key=key):
+                evidence[key] = v
+                self.assertEqual(self.check()['status'], 'pending')
+                evidence[key] = original[key]
+        self.p.row['owner'].append({'id': 'ou_other', 'name': '另一人'})
+        self.assertEqual(self.check()['status'], 'pending')
+        self.p.row['owner'].pop()
+        self.p.add_change('owner', '研发助手', '原负责人', '研发助手')
+        self.p.add_change('owner', '原负责人', '研发助手', '研发助手')
+        self.assertEqual(self.check()['status'], 'pending')
+
+    def test_handoff_does_not_excuse_other_edits_or_changed_confirmer(self):
+        _, material = self.hand_over()
+        clean = copy.deepcopy(self.p.rows)
+        for key in ('plan', 'dependencies', 'plan_confirmer'):
+            self.p.rows = copy.deepcopy(clean)
+            self.p.add_change(key, '改前', '改后', '研发助手')
+            self.assertEqual(self.check()['status'], 'pending')
+        self.p.rows = copy.deepcopy(clean)
+        material['history']['field_changes'].append({'field_id': 'fldUnknown'})
+        self.p.rows[0] = copy.deepcopy(material['history'])
+        self.assertEqual(self.check()['status'], 'pending')
+        self.p.rows = copy.deepcopy(clean)
+        material['history'] = copy.deepcopy(clean[0])
+        self.p.row['plan_confirmer'][0]['id'] = 'ou_other'
+        self.assertEqual(self.check()['status'], 'pending')
+
     def test_material_field_owner_project_links_or_unknown_edits_invalidate_even_after_revert(self):
         for key in ('plan', 'plan_confirmer', 'owner', 'project', 'requirements', 'dependencies', 'fldUnknown'):
             with self.subTest(key=key):

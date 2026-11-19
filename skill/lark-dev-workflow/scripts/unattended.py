@@ -530,6 +530,10 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
                 run, reason, baseline = True, 'mode_changed', None
             if gate_rows and not run:
                 run, reason = True, 'gate_event_evidence'
+            if (not run and policy is not None and previous_mode == mode
+                    and (state.get('last_result') or {}).get('outcome') == 'waiting'
+                    and state.get('registered_start_check_revision', 1) < registered_requests.START_CHECK_REVISION):
+                run, reason = True, 'registered_start_check_updated'
             if not run:
                 state['idle_wakes'] = 0
                 state.pop('last_error', None)
@@ -602,6 +606,8 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             # Only the START snapshot is delivered. Changes made during execution remain visible.
             state.update(checkpoint=snapshot_id, session_id=session_id,
                          last_result=result, last_success_at=now(), last_success_epoch=clock())
+            if policy is not None:
+                state['registered_start_check_revision'] = registered_requests.START_CHECK_REVISION
             state['session_runs'] = run_context.session_runs(state, config['session_max_runs']) + 1
             state.pop('session_handoff', None)
             optional_json(directory / 'checkpoint-snapshot.json', snapshot, state)
