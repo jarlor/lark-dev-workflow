@@ -114,7 +114,11 @@ python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/brid
 
 运行 `python3 service/workflow_rule.py --config /etc/lark-dev-workflow/demo/bridge.json --rule 项目条件`。专查项目条件时，工具核对关联字段指向的项目表，再读回指定项目行。即使规则后面只是“查找记录”，也能单独验证这项触发条件。
 
-检查更新规则时，`enabled` 显示飞书里的启停状态，`updates_trigger_row_only` 表示唯一动作只更新触发行的状态。若已有固定定义，可把上次核实的 `definition_sha256` 填入该项，后续步骤变化就会报告不匹配。正式项目按表使用 `requirements`、`bugs` 或 `work`，同时核对原绑定中的 AI 节点、下一步和必填条件。独立技术表用 `diagnostic`。普通文字匹配不能证明只影响一个项目。负责人仅设为“非空”时，`fixed_bot_owner_verified` 为 false。工具只报告规则配置，不写触发标记，也不判断业务是否可派工。
+检查更新规则时，`enabled` 显示飞书里的启停状态，`updates_trigger_row_only` 表示唯一动作只更新触发行的状态。若已有固定定义，可把上次核实的 `definition_sha256` 填入该项，后续步骤变化就会报告不匹配。正式项目按表使用 `requirements`、`bugs` 或 `work`，同时核对原绑定中的 AI 节点、下一步和必填条件。独立技术表用 `diagnostic`。正式项目用真实的项目关联字段和项目记录限制范围。
+
+若该节点由本行负责人办理，在飞书把条件设为“负责人等于研发助手”，并在本地这条规则里填写 `owner_field_id` 和 `"owner_match": "bound_assistant"`。检查器会核对它是单人字段，并用已绑定的助手账号 ID 比对规则。完全匹配时返回 `fixed_bot_owner_verified=true`。只要求“负责人不为空”的旧规则返回 false。规则检查为只读。验证实际效果时，在测试副本分别用助手、同事、无人负责的记录试一次，再重放一次助手的触发。核对只有助手那条进入下一步，并在该行历史里查到一次状态变化。
+
+读取规则需要应用权限 `base:workflow:read`。使用飞书 CLI 修改、启用或停用已有规则还需要 `base:workflow:update`。安装 Skill 本身不授予这项权限。
 
 ## 启动同一个执行器
 

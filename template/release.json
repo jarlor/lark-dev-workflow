@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.2.0",
+    "skill_version": "2.2.1",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -96,7 +96,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 447,
+  "automated_tests_passed": 454,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -108,7 +108,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.0",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.1",
   "documentation_updated_on": "2026-11-19",
   "validation_history": {
     "1.1.0": {
@@ -375,32 +375,57 @@
       "target_linux_installed": false,
       "installation_note": "Candidate checks do not prove installation. Install and project-rule adoption are verified after release.",
       "independent_behavior_cases": 12
+    },
+    "2.2.0": {
+      "version": "2.2.0",
+      "date": "2026-11-19",
+      "tests": 447,
+      "environments": [
+        "local offline suite",
+        "isolated Linux suite",
+        "same-tenant Feishu test copy with a dedicated assistant and a single Linux service"
+      ],
+      "scope": [
+        "same_event_service_wakes_existing_codex_session",
+        "human_requirement_scope_click_recovered_from_received_event_and_record_history",
+        "one_linked_work_plan_and_one_readback_verified_mention_to_plan_reviewer",
+        "human_plan_click_verified_from_normal_receiver_and_record_history",
+        "unchanged_or_repeated_checks_do_not_duplicate_work_or_notice"
+      ],
+      "not_validated": [
+        "product_implementation_in_prepare_mode",
+        "production_project_handoff_or_deployment"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "The candidate ran against an isolated test copy. The production project had not switched at packaging."
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.2.0",
+  "release_version": "2.2.1",
   "skill_release_validation": {
-    "version": "2.2.0",
+    "version": "2.2.1",
     "date": "2026-11-19",
-    "tests": 447,
+    "tests": 454,
     "environments": [
-      "local offline suite",
-      "isolated Linux suite",
-      "same-tenant Feishu test copy with a dedicated assistant and a single Linux service"
+      "local SDK suite",
+      "isolated Linux SDK suite",
+      "same-tenant Feishu technical test table"
     ],
     "scope": [
-      "same_event_service_wakes_existing_codex_session",
-      "human_requirement_scope_click_recovered_from_received_event_and_record_history",
-      "one_linked_work_plan_and_one_readback_verified_mention_to_plan_reviewer",
-      "human_plan_click_verified_from_normal_receiver_and_record_history",
-      "unchanged_or_repeated_checks_do_not_duplicate_work_or_notice"
+      "source_browser_and_candidate_cli_scan_proofs_checked_separately",
+      "inspection_and_preparation_only_scans_excluded_from_handoff",
+      "exact_owner_matches_one_bound_assistant_account_not_display_name",
+      "exact_owner_workflow_definition_independently_read_back_twice",
+      "single_assistant_owned_test_row_advanced_to_human_node",
+      "human_owned_and_unassigned_rows_remained_at_source",
+      "repeated_marker_did_not_advance_the_human_node"
     ],
     "not_validated": [
-      "product_implementation_in_prepare_mode",
-      "production_project_handoff_or_deployment"
+      "production_project_handoff_or_deployment",
+      "all_formal_project_native_node_rules_and_free_allowance_over_time"
     ],
     "target_linux_installed": false,
-    "installation_note": "The candidate ran against an isolated test copy. The production project had not switched at packaging."
+    "installation_note": "The release candidate was verified in a private Linux test installation. Production cutover is separate."
   },
   "source_at_packaging": {
     "template_version": "2.0.0",
