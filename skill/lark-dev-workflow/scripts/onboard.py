@@ -26,6 +26,54 @@ class OnboardingError(Exception):
     pass
 
 
+class FormShareScopeMissing(OnboardingError):
+    """The verified bot cannot inspect the optional form sharing settings."""
+
+
+def bot_actor(binding):
+    """A missing operator keeps a legacy user binding. An invalid one never does."""
+    if 'cli_actor' not in binding:
+        return None
+    actor = binding['cli_actor']
+    if (not isinstance(actor, dict) or set(actor) != {'identity', 'profile', 'app_id', 'open_id'}
+            or actor['identity'] != 'bot'
+            or not isinstance(actor['profile'], str) or not re.fullmatch(r'[\w.-]+', actor['profile'])
+            or actor['profile'].startswith('-')
+            or not isinstance(actor['app_id'], str) or not re.fullmatch(r'cli_[A-Za-z0-9]+', actor['app_id'])
+            or not isinstance(actor['open_id'], str) or not re.fullmatch(r'ou_[A-Za-z0-9]+', actor['open_id'])):
+        raise OnboardingError('助手绑定需要专用 profile、应用 ID（cli_）和机器人 open_id（ou_）。')
+    return actor
+
+
+def verify_bot(actor, profile, runner):
+    """Check the selected local profile AND the actual server-side bot before business reads."""
+    bot_actor({'cli_actor': actor})
+    if profile != actor['profile']:
+        raise OnboardingError('CLI profile 不符合项目绑定，未访问项目。')
+    def probe(args):
+        try:
+            result = runner(['lark-cli', *args, '--profile', profile], capture_output=True,
+                            text=True, timeout=30, env=dict(os.environ, LARKSUITE_CLI_NO_UPDATE_NOTIFIER='1',
+                                                           LARKSUITE_CLI_NO_SKILLS_NOTIFIER='1'))
+            payload = json.loads(result.stdout)
+        except (OSError, subprocess.TimeoutExpired, TypeError, ValueError):
+            payload = None
+        if not isinstance(payload, dict) or result.returncode:
+            raise OnboardingError('无法核实已绑定的机器人身份；不会改用个人账号。')
+        return payload
+    info = probe(['whoami'])
+    if (info.get('profile'), info.get('identity'), info.get('appId')) != (profile, 'bot', actor['app_id']):
+        raise OnboardingError('专用 profile 的身份或应用 ID 与绑定不符。')
+    info = probe(['api', 'GET', '/open-apis/bot/v3/info', '--as', 'bot'])
+    if (info.get('identity', 'bot') != 'bot' or info.get('ok', True) is not True
+            or info.get('code', 0) != 0):
+        raise OnboardingError('无法核实当前机器人的 open_id。')
+    data = info.get('data', info)
+    bot = data.get('bot', data) if isinstance(data, dict) else None
+    if not isinstance(bot, dict) or bot.get('open_id') != actor['open_id']:
+        raise OnboardingError('当前机器人 open_id 与项目绑定不符。')
+
+
 def read_json(path):
     with Path(path).open(encoding='utf-8') as stream:
         return json.load(stream)
@@ -57,15 +105,18 @@ def parse_base_url(value):
 
 
 class Cli:
-    def __init__(self, profile=None, runner=subprocess.run):
+    def __init__(self, profile=None, runner=subprocess.run, *, actor=None):
         self.profile = profile
         self.runner = runner
         self.calls = []
+        self.operator = 'bot' if actor is not None else 'user'
+        if actor is not None:
+            verify_bot(actor, profile, runner)
 
     def _invoke(self, domain, command, arguments, cwd=None):
         if not ((domain == 'base' and command in READ_COMMANDS) or (domain == 'docs' and command == '+fetch')):
             raise OnboardingError(f'Remote mutation is not supported: {domain} {command}')
-        argv = ['lark-cli', domain, command, *map(str, arguments), '--as', 'user']
+        argv = ['lark-cli', domain, command, *map(str, arguments), '--as', self.operator]
         if domain == 'base' and '--format' not in arguments:
             argv.extend(['--format', 'json'])
         if self.profile:
@@ -77,8 +128,7 @@ class Cli:
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise OnboardingError(f'{command}: read failed ({type(exc).__name__}); no write attempted.') from exc
 
-    @staticmethod
-    def _envelope(result, command):
+    def _envelope(self, result, command):
         envelope = None
         for raw in (result.stdout, result.stderr):
             try:
@@ -91,9 +141,17 @@ class Cli:
                 pass
         if result.returncode != 0 or not envelope or envelope.get('ok') is not True:
             error = (envelope or {}).get('error', {})
+            if not isinstance(error, dict):
+                error = {}
+            if (command == '+form-share-get' and self.operator == 'bot'
+                    and envelope and envelope.get('ok') is False and envelope.get('identity') == 'bot'
+                    and error.get('identity') == 'bot'
+                    and error.get('type') == 'authorization' and error.get('subtype') == 'app_scope_not_applied'
+                    and error.get('code') == 99991672 and error.get('missing_scopes') == ['base:form:update']):
+                raise FormShareScopeMissing('base:form:update')
             detail = error.get('message') or 'CLI returned no confirmed success envelope'
             raise OnboardingError(f'{command}: {detail}')
-        if envelope.get('identity') not in (None, 'user'):
+        if envelope.get('identity') not in (None, self.operator):
             raise OnboardingError(f'{command}: unexpected operator identity')
         data = envelope.get('data')
         if not isinstance(data, dict):
@@ -128,6 +186,8 @@ class Cli:
                 raise OnboardingError('+record-get: expected a v1 NDJSON manifest, not an ordinary API envelope')
             if manifest.get('base_token') != base_token or manifest.get('table_id') != table_id:
                 raise OnboardingError('+record-get: manifest identifies a different Base or table')
+            if manifest.get('identity') not in (None, self.operator):
+                raise OnboardingError('+record-get: unexpected operator identity')
             query = manifest.get('query_context', {})
             if (query.get('record_scope') != 'selected_record_ids' or query.get('requested_record_count') != 1
                     or manifest.get('records_count') != 1 or manifest.get('page_count') != 1 or manifest.get('has_more') is not False):
@@ -233,7 +293,10 @@ def collect(cli, token, contract, project_record_id=None):
             if not form_id:
                 raise OnboardingError('Form has no ID.')
             form['questions_config'] = cli.read('+form-questions-list', *args, '--form-id', form_id)
-            form['share_config'] = cli.read('+form-share-get', *args, '--form-id', form_id)
+            try:
+                form['share_config'] = cli.read('+form-share-get', *args, '--form-id', form_id)
+            except FormShareScopeMissing:
+                form['share_settings_missing_scope'] = 'base:form:update'
     snapshot = {
         'snapshot_format': 1, 'observed_at': datetime.now(timezone.utc).isoformat(),
         'base': base, 'blocks': blocks, 'tables': tables,
@@ -606,7 +669,8 @@ def validate(snapshot, contract, token, url, project_key, project_name, scope,
         if len(forms) != 1:
             errors.append('feedback_form: submission form is missing or ambiguous.')
         else:
-            share = forms[0].get('share_config', {})
+            share_unverified = forms[0].get('share_settings_missing_scope') == 'base:form:update'
+            share = {} if share_unverified else forms[0].get('share_config', {})
             settings = share.get('settings', {})
             feedback_entry = {
                 'enabled': share.get('enabled'),
@@ -616,7 +680,10 @@ def validate(snapshot, contract, token, url, project_key, project_name, scope,
                 'share_url': share.get('share_url'),
                 'submission_verified': False,
             }
-            if share.get('enabled') is False:
+            if share_unverified:
+                feedback_entry['share_settings_missing_scope'] = 'base:form:update'
+                warnings.append('助手能查看表单问题，但没有查看分享设置所需的 base:form:update 权限。表单能否提交尚未核实。')
+            elif share.get('enabled') is False:
                 warnings.append('Feedback form is disabled: its structure can be bound, but it is not submission-ready. Activate only with separate authorization; this tool does not publish it.')
             elif share.get('enabled') is not True or not share.get('share_url'):
                 warnings.append('Feedback submission entry is not confirmed usable; this inspection does not enable or publish the form.')
@@ -808,6 +875,9 @@ def parser():
     result.add_argument('--save-snapshot', type=Path)
     result.add_argument('--source-snapshot', type=Path, help='Check isolation from the source template Base and Docx resources.')
     result.add_argument('--profile')
+    result.add_argument('--as', dest='operator', choices=['user', 'bot'])
+    result.add_argument('--bot-app-id')
+    result.add_argument('--bot-open-id')
     result.add_argument('--output', required=True, type=Path)
     result.add_argument('--refresh', action='store_true')
     return result
@@ -839,7 +909,22 @@ def main(argv=None):
         governance = read_json(args.governance) if args.governance else None
         if governance is None and args.refresh and args.output.exists():
             governance = read_json(args.output).get('governance')
-        cli = Cli(args.profile)
+        previous_actor = bot_actor(read_json(args.output)) if args.output.exists() else None
+        if args.operator == 'user' and previous_actor:
+            raise OnboardingError('现有绑定使用机器人；请使用单独的候选绑定切换身份。')
+        actor = previous_actor
+        if args.operator == 'bot' or args.bot_app_id or args.bot_open_id:
+            if args.operator != 'bot':
+                raise OnboardingError('机器人 ID 必须配合 --as bot 使用。')
+            requested_actor = bot_actor({'cli_actor': {
+                'identity': 'bot', 'profile': args.profile, 'app_id': args.bot_app_id,
+                'open_id': args.bot_open_id}})
+            if args.output.exists() and requested_actor != previous_actor:
+                raise OnboardingError('不能原地更换身份；请生成单独的候选绑定。')
+            actor = requested_actor
+        if actor and args.profile and args.profile != actor['profile']:
+            raise OnboardingError('所选 CLI profile 与绑定不符。')
+        cli = Cli(actor['profile'] if actor else args.profile, actor=actor if not args.snapshot else None)
         snapshot = read_json(args.snapshot) if args.snapshot else collect(cli, token, contract, args.project_record_id)
         if args.save_snapshot:
             atomic_json(args.save_snapshot, snapshot)
@@ -848,6 +933,8 @@ def main(argv=None):
                                   args.scope, governance, source, args.project_record_id)
         report['evidence_mode'] = 'offline_snapshot' if args.snapshot else 'live_read_only'
         report['commands'] = cli.calls
+        if actor:
+            config['cli_actor'] = actor
         config['validation_mode'] = report['evidence_mode']
         if args.snapshot:
             report['warnings'].append('Offline validation describes the recorded snapshot, not current server state or write permission.')

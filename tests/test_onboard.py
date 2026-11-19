@@ -515,6 +515,71 @@ class BindingTests(unittest.TestCase):
 
 
 class CliTests(unittest.TestCase):
+    def test_bot_can_check_questions_when_only_form_sharing_is_unreadable(self):
+        contract, snapshot = fixture()
+        contract['feedback_form'] = {'name': 'Submit', 'table_role': 'work', 'fields': ['title'], 'required': ['title']}
+        actor = {'identity': 'bot', 'profile': 'fixture-bot', 'open_id': 'ou_fixture', 'app_id': 'cli_fixture'}
+        scope_error = {'type': 'authorization', 'subtype': 'app_scope_not_applied', 'code': 99991672,
+                       'identity': 'bot', 'missing_scopes': ['base:form:update']}
+        answers = [{'id': 'fldWorkTitle', 'required': True}]
+        responses = {
+            '+base-get': {'base': {'base_token': 'CopyFixture'}}, '+base-block-list': {'blocks': [], 'total': 0},
+            '+table-list': {'tables': [{'id': 'tblFixture', 'name': 'Work'}], 'total': 1},
+            '+field-list': {'fields': [], 'total': 0}, '+view-list': {'views': [], 'total': 0},
+            '+form-list': {'forms': [{'id': 'formFixture', 'name': 'Submit'}], 'total': 1},
+            '+form-questions-list': {'questions': answers, 'total': 1},
+        }
+        def runner(argv, **kwargs):
+            if argv[1] == 'whoami':
+                payload = {'profile': actor['profile'], 'identity': 'bot', 'appId': actor['app_id']}
+            elif argv[1] == 'api':
+                payload = {'ok': True, 'identity': 'bot', 'data': {'bot': {'open_id': actor['open_id']}}}
+            elif argv[2] == '+form-share-get':
+                return subprocess.CompletedProcess(argv, 3, '', json.dumps({'ok': False, 'identity': 'bot', 'error': scope_error}))
+            else:
+                payload = {'ok': True, 'identity': 'bot', 'data': responses[argv[2]]}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(payload), '')
+        cli = m.Cli(actor['profile'], runner, actor=actor)
+        observed = m.collect(cli, 'CopyFixture', {})
+        form = observed['tables'][0]['forms'][0]
+        self.assertNotIn('share_config', form)
+        snapshot['tables'][1]['forms'] = [form]
+        _, report = check(contract, snapshot)
+        self.assertEqual(report['status'], 'ready')
+        entry = report['feedback_entry']
+        self.assertIsNone(entry['enabled'])
+        self.assertIsNone(entry['share_url'])
+        self.assertFalse(entry['submission_verified'])
+        self.assertEqual(entry['share_settings_missing_scope'], 'base:form:update')
+        self.assertTrue(any('表单能否提交尚未核实' in w for w in report['warnings']))
+        form['questions_config']['questions'][0]['required'] = False
+        _, report = check(contract, snapshot)
+        self.assertEqual(report['status'], 'partial')
+        self.assertTrue(any('required question is optional' in e for e in report['errors']))
+
+    def test_other_form_errors_still_stop_discovery(self):
+        original = {'type': 'authorization', 'subtype': 'app_scope_not_applied', 'code': 99991672,
+                    'identity': 'bot', 'missing_scopes': ['base:form:update'], 'message': 'base:form:update'}
+        for operator, command, edit, envelope_identity in (
+                ('user', '+form-share-get', {}, 'user'),
+                ('bot', '+form-questions-list', {}, 'bot'),
+                ('bot', '+form-share-get', {}, 'user'),
+                ('bot', '+form-share-get', {'identity': 'user'}, 'bot'),
+                ('bot', '+form-share-get', {'code': 403}, 'bot'),
+                ('bot', '+form-share-get', {'subtype': 'permission_denied'}, 'bot'),
+                ('bot', '+form-share-get', {'missing_scopes': ['base:form:read']}, 'bot'),
+                ('bot', '+form-share-get', {'missing_scopes': ['base:form:update', 'base:form:read']}, 'bot'),
+                ('bot', '+form-share-get', {'missing_scopes': None}, 'bot')):
+            with self.subTest(operator=operator, command=command, edit=edit, identity=envelope_identity):
+                error = dict(original, **edit)
+                result = subprocess.CompletedProcess([], 3, '', json.dumps({'ok': False, 'identity': envelope_identity,
+                                                                           'error': error}))
+                cli = m.Cli(runner=lambda *args, **kwargs: result)
+                cli.operator = operator
+                with self.assertRaises(m.OnboardingError) as raised:
+                    cli.read(command, '--base-token', 'CopyFixture')
+                self.assertNotIsInstance(raised.exception, m.FormShareScopeMissing)
+
     def test_form_views_use_questions_api_not_view_configuration(self):
         class FakeCli:
             def __init__(self):
@@ -542,7 +607,10 @@ class CliTests(unittest.TestCase):
                 raise AssertionError('Unexpected pagination: ' + command)
         cli = FakeCli()
         result = m.collect(cli, 'CopyFixture', {})
-        self.assertEqual(result['tables'][0]['forms'][0]['questions_config']['total'], 0)
+        form = result['tables'][0]['forms'][0]
+        self.assertEqual(form['questions_config']['total'], 0)
+        self.assertIs(form['share_config']['enabled'], False)
+        self.assertNotIn('share_settings_missing_scope', form)
         self.assertNotIn('+view-get-visible-fields', cli.calls)
         self.assertIn('+form-questions-list', cli.calls)
 

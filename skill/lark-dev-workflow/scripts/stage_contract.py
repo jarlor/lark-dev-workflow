@@ -5,7 +5,7 @@ Business confirmation and read-back evidence still belong to the worker.
 """
 
 
-def problems(field, contract, fields):
+def binding_problems(contract, fields):
     issues = []
     if (not isinstance(contract, dict) or set(contract) != {'steps', 'done', 'cancelled'}
             or not isinstance(contract['steps'], list) or not contract['steps']
@@ -23,6 +23,28 @@ def problems(field, contract, fields):
     names = [s['name'] for s in steps] + [contract['done'], contract['cancelled']]
     if len(names) != len(set(names)):
         return ['流程步骤、完成和取消名称不能重复。']
+    for step in steps:
+        prefix = step['name'] + '：'
+        person = step['person_field']
+        if person is not None:
+            mapped_person = fields.get(person, {})
+            if mapped_person.get('type') != 'user' or not mapped_person.get('id'):
+                issues.append(prefix + '完成人必须映射到同表的人员字段。')
+        required = step['required_fields']
+        if len(required) != len(set(required)) or any(k not in fields for k in required):
+            issues.append(prefix + '必填字段没有完整映射。')
+            continue
+        required_ids = {fields[k].get('id') for k in required}
+        if None in required_ids:
+            issues.append(prefix + '必填字段缺少真实编号。')
+    return issues
+
+
+def problems(field, contract, fields):
+    issues = binding_problems(contract, fields)
+    if issues:
+        return issues
+    steps = contract['steps']
     observed = field.get('stage_config', {}).get('property', {}).get('options')
     if not isinstance(observed, list) or any(not isinstance(o, dict) for o in observed):
         return ['没有读到真实流程节点配置。']
@@ -39,22 +61,8 @@ def problems(field, contract, fields):
             continue
         prefix = step['name'] + '：'
         person = step['person_field']
-        if person is not None:
-            mapped_person = fields.get(person, {})
-            if mapped_person.get('type') != 'user' or not mapped_person.get('id'):
-                issues.append(prefix + '完成人必须映射到同表的人员字段。')
-                continue
-            people = [mapped_person['id']]
-        else:
-            people = []
-        required = step['required_fields']
-        if len(required) != len(set(required)) or any(k not in fields for k in required):
-            issues.append(prefix + '必填字段没有完整映射。')
-            continue
-        required_ids = {fields[k].get('id') for k in required}
-        if None in required_ids:
-            issues.append(prefix + '必填字段缺少真实编号。')
-            continue
+        people = [fields[person]['id']] if person is not None else []
+        required_ids = {fields[k]['id'] for k in step['required_fields']}
         rule = node.get('transitionRule')
         if not isinstance(rule, dict):
             issues.append(prefix + '没有读到节点完成条件。')

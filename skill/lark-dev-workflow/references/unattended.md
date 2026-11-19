@@ -14,13 +14,13 @@
 
 - Linux、可用的用户 `crontab`、Python 3.9+ 和 Codex CLI。`.sh` 是统一入口，Python 部分只需标准库，无需 `jq`。
 - 选择已有的本人访问方式：CLI 模式需要 Lark CLI 与已核实的用户 profile；网页模式需要 Node.js 22+ 和本机已登录的浏览器，按 [本人网页接入](browser-access.md) 配置。不因缺 profile 自动创建应用、bot 或选用其他项目的应用。
-- 在执行 cron 的同一 Linux 用户下完成 Codex 登录，并核实所选飞书途径的本人身份。凭据保留在原 CLI 或浏览器中，不写进项目配置、Skill 或 cron。
+- 在执行 cron 的同一 Linux 用户下完成 Codex 登录，并核实所选飞书途径的身份（本人或[专用助手](assistant-identity.md)）。凭据保留在原 CLI 或浏览器中，不写进项目配置、Skill 或 cron。
 - 项目绑定使用格式 2、`scope.mode=project_record`，表、字段和项目关系已按实际结构核实。Base-only 项目可保留 `documents={}`。CLI 可读取已绑定 Docx；首版网页读取不支持非空 Docx 绑定，不能为通过检查删掉原绑定。旧人工局部映射不能只改格式号就用于自动扫描。
 - Linux 上已有项目工作目录和所选访问方式需要的工具；CLI 操作复用相应 `lark-*` 技能，网页遵守所用浏览器工具规则。沿用该项目的执行权限与业务授权。脚本不添加全盘访问或绕过沙箱；没有执行权限的动作会失败并留下原因。
 
 首先核对本机 Codex 版本与所选访问方式。Codex 需支持 `exec`、按会话 ID `exec resume`、`--json`、`--output-schema` 和 `--output-last-message`。CLI 协议按 Codex CLI 0.159.2 和 Lark CLI 1.0.94 的接口编写；不依赖实时事件订阅。项目实际可读写范围仍需在目标 Linux 机器核实。
 
-旧反馈表没有“反馈项目”字段时，先按 [旧表适配](project-mapping.md#没有反馈项目的旧反馈表) 检查已有字段。可明确选择只扫描已关联事项；这不包括未归属的新反馈，不能当作完整反馈入口已接通。本地映射或离线测试也不能代替真实本人登录。
+旧反馈表没有“反馈项目”字段时，先按 [旧表适配](project-mapping.md#没有反馈项目的旧反馈表) 检查已有字段。可明确选择只扫描已关联事项；这不包括未归属的新反馈，不能当作完整反馈入口已接通。本地映射或离线测试也不能代替实际访问核验。
 
 自动扫描需要真实项目记录、`scope.project_table_id`、各表的 `id` 与实际 `fields` 映射。非项目表的 `project` 关联必须指向同一项目表。默认 `project_input` 模式接收未归属反馈，还需要顶层 `project_number`、项目表的 `number`，以及反馈表的 `project_input` 和 `status`；`linked_only` 不要求这些分流字段。但配置中已声明的项目编号仍须与实际记录一致；已绑定 Docx 时也必须保留并核对编号，以免漏掉本项目章节的评论。补齐映射时先只读核实字段 ID、类型和关联目标，另存候选配置并比较原项目身份，不机械改键或编造字段。
 
@@ -48,6 +48,8 @@ sh "$TASK_SKILL/scripts/unattended.sh" scan --config "$TASK_CONFIG"
 ```
 
 `init` 只创建本地配置和私有状态目录，不覆盖已有文件、不登录、不创建项目、不安装 cron。CLI 运行配置为格式 1，网页配置为格式 2；它们与项目绑定的格式号不是同一项。需要指定 Codex 配置时在 `init` 加 `--codex-profile`。`check` 只检查本地路径和绑定；`scan` 才实际只读飞书，返回记录／评论数量与覆盖范围，不启动 Codex，也不把事项记为已处理。完整扫描失败时保留原进度。
+
+专用助手可用 `sh "$TASK_SKILL/scripts/unattended.sh" scan --config "$TASK_CONFIG" --inspect-native-stages` 检查原生流程表。它核对真实字段类型、状态顺序、各项所属项目和评论，把本次结果存入状态目录下的 `native-stage-inspection/`。如果已配置接收事件，也会登记本项目的记录和可见状态。此时线上节点的完成人和必填条件仍待核实，不能凭这份结果交接执行器或安排开发。
 
 先在目标机器核实真实记录及完整评论能读到，再在项目已经授权 AI 处理事项的前提下执行一次。网页入口按 [网页接入说明](browser-access.md#完整性与继续运行) 核对当前可见评论和已加载回复，包含已解决索引；未完成这项核实时保持暂停，不因离线测试通过执行 `tick` 或安装 cron。
 

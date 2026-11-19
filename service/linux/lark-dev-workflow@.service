@@ -1,0 +1,22 @@
+[Unit]
+Description=Feishu project events and Codex scheduler (%i)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=lark-workflow
+UMask=0077
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONDONTWRITEBYTECODE=1
+LoadCredential=feishu_app_secret:/etc/lark-dev-workflow/%i/app-secret
+ExecStartPre=/opt/lark-dev-workflow/venv/bin/python /opt/lark-dev-workflow/service/event_bridge.py check --config /etc/lark-dev-workflow/%i/bridge.json
+ExecStartPre=/opt/lark-dev-workflow/venv/bin/python /opt/lark-dev-workflow/service/linux/check_schedule.py /etc/lark-dev-workflow/%i/bridge.json /etc/lark-dev-workflow/%i/previous-runners.json
+ExecStart=/opt/lark-dev-workflow/venv/bin/python /opt/lark-dev-workflow/service/event_bridge.py listen --config /etc/lark-dev-workflow/%i/bridge.json
+Restart=on-failure
+RestartSec=30s
+KillMode=mixed
+TimeoutStopSec=infinity
+
+[Install]
+WantedBy=multi-user.target

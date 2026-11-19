@@ -28,7 +28,7 @@ except ImportError:  # Windows uses its standard-library byte-range lock.
 else:
     msvcrt = None
 
-from onboard import Cli as BaseCli, OnboardingError, atomic_json, read_json
+from onboard import Cli as BaseCli, OnboardingError, atomic_json, bot_actor, read_json
 
 
 class CommentError(OnboardingError):
@@ -49,6 +49,11 @@ def nonempty(value):
 
 
 def current_profile(config, requested=None, runner=subprocess.run):
+    actor = bot_actor(config)
+    if actor:
+        if requested is not None and requested != actor['profile']:
+            raise CommentError('助手不能使用其他项目或个人 profile。')
+        return actor['profile']
     selected = requested or config.get('lark_profile') or config.get('profile')
     if selected is not None:
         if not nonempty(selected):
@@ -70,19 +75,19 @@ def current_profile(config, requested=None, runner=subprocess.run):
 
 
 class Cli:
-    """An allowlisted reader with explicit user identity and profile on every call."""
-    def __init__(self, profile, runner=subprocess.run):
+    """An allowlisted reader with explicit project identity and profile on every call."""
+    def __init__(self, profile, runner=subprocess.run, *, actor=None):
         if not nonempty(profile):
             raise CommentError('An explicit resolved profile is required.')
         self.profile, self.runner = profile, runner
         self.calls = []
-        self.base = BaseCli(profile, runner)
+        self.base = BaseCli(profile, runner, actor=actor)
 
     def read(self, domain, command, *args):
         if (domain, command) not in {('drive', '+list-comments'), ('drive', '+list-replies'),
                                      ('docs', '+fetch')}:
             raise CommentError('Only comment/document reads are supported.')
-        argv = ['lark-cli', domain, command, *map(str, args), '--as', 'user', '--profile', self.profile]
+        argv = ['lark-cli', domain, command, *map(str, args), '--as', self.base.operator, '--profile', self.profile]
         self.calls.append({'domain': domain, 'command': command})
         try:
             result = self.runner(argv, capture_output=True, text=True, timeout=60,
@@ -90,7 +95,7 @@ class Cli:
                                           LARKSUITE_CLI_NO_SKILLS_NOTIFIER='1'))
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise CommentError(f'{command}: read failed ({type(exc).__name__}).') from exc
-        return BaseCli._envelope(result, command)
+        return self.base._envelope(result, command)
 
     def read_record(self, token, table_id, record_id, fields):
         self.calls.append({'domain': 'base', 'command': '+record-get'})
@@ -407,7 +412,9 @@ class Locator:
 
 
 def binding_identity(config):
-    return {'base_token': config['base']['token'], 'scope': copy.deepcopy(config.get('scope')),
+    actor = bot_actor(config)
+    return {**({'cli_actor': dict(actor)} if actor is not None else {}),
+            'base_token': config['base']['token'], 'scope': copy.deepcopy(config.get('scope')),
             'documents': sorted([{'token': d['token'], 'anchor': d.get('anchor')}
                                  for d in config.get('documents', {}).values()], key=lambda d: (d['token'], d['anchor'] or ''))}
 
@@ -554,6 +561,11 @@ def scan(config, state, cli, *, include_resolved=False, known=None):
     return updated, report
 
 
+def assistant_authored(state, observation):
+    actor = state['binding'].get('cli_actor')
+    return bool(actor and observation.get('author') == actor['open_id'])
+
+
 def pending(state):
     state = upgrade_state(state)
     result = []
@@ -562,7 +574,7 @@ def pending(state):
         context = event['context_history'][-1]
         observed = {**event['revisions'][revision], **context.get('current_readback', context['snapshot']),
                     'observation_id': event['latest_observation_id']}
-        if observed['location']['status'] == 'out_of_scope':
+        if observed['location']['status'] == 'out_of_scope' or assistant_authored(state, observed):
             continue
         acknowledgements = state['acknowledgements'].get(key, {}).get(revision, [])
         if not any(ack.get('observation_id') == event['latest_observation_id'] for ack in acknowledgements):
@@ -586,6 +598,8 @@ def acknowledgement(state, payload):
         raise CommentError('Thread status or ownership changed; review the latest observation before acknowledgement.')
     context = event['context_history'][-1]
     observed = {**event['revisions'][revision], **context.get('current_readback', context['snapshot'])}
+    if assistant_authored(state, observed):
+        raise CommentError('The assistant wrote this reply. Keep it as thread history or receipt only.')
     if observed['location']['status'] != 'in_scope':
         raise CommentError('Comment project ownership is unresolved or outside this project; do not acknowledge it here.')
     evidence = payload.get('evidence')
@@ -683,7 +697,8 @@ def main(argv=None):
             if args.command == 'scan':
                 profile = current_profile(config, args.profile)
                 known = load_locations(read_json(args.locations)) if args.locations else {}
-                updated, result = scan(config, state, Cli(profile), include_resolved=args.include_resolved, known=known)
+                updated, result = scan(config, state, Cli(profile, actor=bot_actor(config)),
+                                       include_resolved=args.include_resolved, known=known)
                 atomic_json(state_path, updated)
             elif args.command == 'ack':
                 updated, result = acknowledgement(state, read_json(args.ack_file))

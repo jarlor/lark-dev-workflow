@@ -421,7 +421,8 @@ class CollectionTests(unittest.TestCase):
         with mock.patch.object(m, 'Cli', return_value=self.cli) as constructor:
             m.collect(self.config, 'fixture-profile', comments_state_path=self.state,
                       lark_bin='/private/example node/lib/lark/cli.js')
-        constructor.assert_called_once_with('fixture-profile', executable='/private/example node/lib/lark/cli.js')
+        constructor.assert_called_once_with('fixture-profile', executable='/private/example node/lib/lark/cli.js',
+                                            actor=None)
 
     def test_injected_reader_reuses_complete_collection_without_constructing_cli(self):
         expected = self.collect()

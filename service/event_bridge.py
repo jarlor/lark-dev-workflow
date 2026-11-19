@@ -1,0 +1,602 @@
+#!/usr/bin/env python3
+"""Receive Feishu change hints and schedule the existing local project tick."""
+import argparse
+import contextlib
+import fcntl
+import hashlib
+import json
+import multiprocessing
+import os
+from pathlib import Path
+import re
+import signal
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'skill/lark-dev-workflow/scripts'))
+import gate_events
+from onboard import atomic_json
+
+
+RECORD = 'drive.file.bitable_record_changed_v1'
+COMMENT = 'drive.notice.comment_add_v1'
+RETENTION = 4096
+PINS = ('app_id', 'tenant_key', 'bot_open_id', 'base_token', 'project_record_id', 'lark_profile')
+TIMERS = {'reconcile_seconds': (600, 30, 86400), 'debounce_seconds': (5, 1, 300),
+          'retry_seconds': (60, 5, 3600)}
+
+
+def load(path):
+    return json.loads(Path(path).read_text(encoding='utf-8'))
+
+
+def absolute(value):
+    return isinstance(value, str) and Path(value).is_absolute()
+
+
+def nonempty(value):
+    return isinstance(value, str) and 0 < len(value) <= 512 and value == value.strip()
+
+
+def config_from(path):
+    config = load(path)
+    required = set(PINS) | {'table_ids', 'state_dir'}
+    allowed = required | set(TIMERS) | {'mode', 'runner_config', 'tick_argv'}
+    if not isinstance(config, dict) or not required <= config.keys() <= allowed:
+        raise ValueError('Invalid service config keys.')
+    if not all(nonempty(config[key]) for key in PINS) or not absolute(config['state_dir']):
+        raise ValueError('Explicit identity pins and an absolute service state_dir are required.')
+    tables = config['table_ids']
+    if not isinstance(tables, list) or not tables or not all(nonempty(v) for v in tables):
+        raise ValueError('table_ids must name the project tables.')
+    if len(set(tables)) != len(tables):
+        raise ValueError('Duplicate table IDs.')
+    config.setdefault('mode', 'observe')
+    if config['mode'] not in ('observe', 'dispatch'):
+        raise ValueError('mode must be observe or dispatch.')
+    for key, (default, minimum, maximum) in TIMERS.items():
+        value = config.setdefault(key, default)
+        if type(value) is not int or not minimum <= value <= maximum:
+            raise ValueError(f'Invalid {key}.')
+    if config['mode'] == 'dispatch':
+        argv = config.get('tick_argv')
+        if (not absolute(config.get('runner_config')) or not isinstance(argv, list)
+                or not argv or not all(nonempty(arg) for arg in argv) or not absolute(argv[0])
+                or argv.count('{runner_config}') != 1 or not os.access(argv[0], os.X_OK)):
+            raise ValueError('Specify the installed local tick command and an exact {runner_config} argument.')
+    if 'runner_config' in config:
+        if not absolute(config['runner_config']):
+            raise ValueError('Runner path must be absolute.')
+        runner_pins(config)
+    return config
+
+
+def runner_pins(config):
+    runner = load(config['runner_config'])
+    if runner.get('format_version') != 3 or runner.get('lark_profile') != config['lark_profile']:
+        raise ValueError('Runner must use the selected assistant profile.')
+    if runner.get('event_tenant_key', config['tenant_key']) != config['tenant_key']:
+        raise ValueError('Runner event tenant differs from the paired service tenant.')
+    paths = [runner.get(key) for key in ('workdir', 'state_dir', 'project_config')]
+    if not all(absolute(path) for path in paths):
+        raise ValueError('Runner binding and state paths must be absolute.')
+    binding = load(paths[2])
+    actor = {'identity': 'bot', 'profile': config['lark_profile'], 'app_id': config['app_id'],
+             'open_id': config['bot_open_id']}
+    if (binding.get('cli_actor') != actor or binding.get('base', {}).get('token') != config['base_token']
+            or binding.get('scope', {}).get('project_record_id') != config['project_record_id']
+            or not set(config['table_ids']) <= {t['id'] for t in binding['tables'].values()}):
+        raise ValueError('Runner actor, Base or project scope does not match the event service.')
+    return tuple(str(Path(path).resolve()) for path in paths)
+
+
+class Journal:
+    """Bounded duplicate suppression and optional, project-scoped gate observations."""
+
+    def __init__(self, config):
+        directory = Path(config['state_dir'])
+        directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if directory.stat().st_mode & 0o077 or directory.stat().st_uid != os.geteuid():
+            raise ValueError('Service state directory must be private to the service account (0700).')
+        self.path = directory / 'hints.sqlite'
+        self.runner = config.get('runner_config')
+        self.runner_paths = runner_pins(config) if self.runner else None
+        self.started_at = int(time.time())
+        identity = [*(config[key] for key in PINS), sorted(config['table_ids'])]
+        signature = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        with self.connect() as conn:
+            conn.execute('CREATE TABLE IF NOT EXISTS seen (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL)')
+            conn.execute('CREATE TABLE IF NOT EXISTS state (singleton INTEGER PRIMARY KEY CHECK(singleton=1), '
+                         'identity TEXT, generation INTEGER, ack INTEGER, last_check INTEGER, result TEXT)')
+            conn.execute("INSERT OR IGNORE INTO state VALUES (1,?,0,0,0,'never')", (signature,))
+            if conn.execute('SELECT identity FROM state').fetchone()[0] != signature:
+                raise ValueError('The journal belongs to another assistant or project.')
+
+            conn.execute('CREATE TABLE IF NOT EXISTS notices(kind TEXT PRIMARY KEY, total INTEGER, latest INTEGER)')
+            conn.execute('CREATE TABLE IF NOT EXISTS writer(singleton INTEGER PRIMARY KEY, binding TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS receipt_source(singleton INTEGER PRIMARY KEY, id TEXT)')
+            conn.execute('INSERT OR IGNORE INTO receipt_source VALUES(1,?)', (str(uuid.uuid4()),))
+            conn.execute('CREATE TABLE IF NOT EXISTS receipts(seq INTEGER PRIMARY KEY, generation INTEGER, '
+                         'binding TEXT, table_id TEXT, record_id TEXT, data TEXT)')
+            conn.execute('CREATE TABLE IF NOT EXISTS membership_barriers(table_id TEXT, record_id TEXT, '
+                         'closed_at INTEGER, reopened_at INTEGER, PRIMARY KEY(table_id, record_id))')
+            if self.runner:
+                pinned = [str(Path(config['runner_config']).resolve()), *self.runner_paths]
+                identity_hash = hashlib.sha256(json.dumps(pinned).encode()).hexdigest()
+                conn.execute('INSERT OR IGNORE INTO writer VALUES (1,?)', (identity_hash,))
+                if conn.execute('SELECT binding FROM writer').fetchone()[0] != identity_hash:
+                    raise ValueError('Service state is already bound to another runner.')
+
+    @contextlib.contextmanager
+    def connect(self):
+        with contextlib.closing(sqlite3.connect(self.path, timeout=5)) as connection, connection:
+            yield connection
+
+    def scope(self, config):
+        if not self.runner:
+            return None
+        if runner_pins(config) != self.runner_paths:
+            raise ValueError('Event receiver runner paths changed. Verify the new binding.')
+        _, directory, project = self.runner_paths
+        runner = load(self.runner)
+        if not runner.get('event_tenant_key'):
+            return None
+        signature = gate_events.signature(load(project), config['tenant_key'])
+        try:
+            index = load(Path(directory) / gate_events.INDEX)
+        except FileNotFoundError:
+            return None
+        if (index.get('signature') == signature and type(index.get('observed_at')) is int
+                and type(index.get('started_at')) is int
+                and int(time.time()) - gate_events.MAX_AGE <= index['observed_at']):
+            return index
+
+    @staticmethod
+    def evidenced_after(conn, table_id, record_id, index):
+        """An observed move requires a full scan that started after it arrived."""
+        barrier = conn.execute('SELECT closed_at,reopened_at FROM membership_barriers '
+                               'WHERE table_id=? AND record_id=?', (table_id, record_id)).fetchone()
+        if barrier is None:
+            return 0
+        closed, reopened = barrier
+        if reopened is None:
+            if index['started_at'] <= closed:
+                return None
+            reopened = index['observed_at']
+            conn.execute('UPDATE membership_barriers SET reopened_at=? WHERE table_id=? AND record_id=?',
+                         (reopened, table_id, record_id))
+        return reopened
+
+    def mark(self, event_id, kind=RECORD, *, index=None, table_id=None, moved=(), changes=(), own=False):
+        digest = hashlib.sha256(event_id.encode()).hexdigest()
+        with self.connect() as conn:
+            if own and not moved:
+                return False
+            added = conn.execute('INSERT OR IGNORE INTO seen(id) VALUES (?)', (digest,))
+            if not added.rowcount:
+                return False
+            conn.execute('DELETE FROM seen WHERE seq <= ?', (added.lastrowid - RETENTION,))
+            if moved:
+                closed = int(time.time())
+                conn.executemany('INSERT OR REPLACE INTO membership_barriers VALUES (?,?,?,NULL)',
+                                 [(table_id, record_id, closed) for record_id in moved])
+                conn.executemany('DELETE FROM receipts WHERE table_id=? AND record_id=?',
+                                 [(table_id, record_id) for record_id in moved])
+                count, = conn.execute('SELECT count(*) FROM membership_barriers').fetchone()
+                if count > RETENTION:
+                    # Overflow cannot erase an invalidation and re-enable a stale member.
+                    conn.execute('DELETE FROM membership_barriers')
+                    conn.execute("INSERT INTO membership_barriers VALUES ('','',?,NULL)", (closed,))
+            if own:
+                return False
+            conn.execute('UPDATE state SET generation=generation+1')
+            if changes:
+                generation, = conn.execute('SELECT generation FROM state').fetchone()
+                reset_after = self.evidenced_after(conn, '', '', index)
+                allowed = []
+                if reset_after is not None:
+                    # A quiet project's evidence can outlive the general hint-ID window.
+                    retained = (json.loads(row[0]) for row in conn.execute(
+                        'SELECT data FROM receipts WHERE binding=? AND table_id=?', (index['signature'], table_id)))
+                    keys = {(row['event_id'], row['record_id'], row['field_id']) for row in retained}
+                    for change in changes:
+                        if (event_id, change['record_id'], change['field_id']) in keys:
+                            continue
+                        record_after = self.evidenced_after(conn, table_id, change['record_id'], index)
+                        if record_after is not None and change['update_time'] > max(reset_after, record_after):
+                            allowed.append((generation, index['signature'], table_id, change['record_id'],
+                                            json.dumps(change)))
+                conn.executemany('INSERT INTO receipts(generation,binding,table_id,record_id,data) VALUES(?,?,?,?,?)',
+                                 allowed[-gate_events.LIMIT:])
+                conn.execute('DELETE FROM receipts WHERE seq NOT IN '
+                             '(SELECT seq FROM receipts ORDER BY seq DESC LIMIT ?)', (gate_events.LIMIT,))
+            conn.execute('INSERT OR IGNORE INTO notices VALUES (?,0,0)', (kind,))
+            conn.execute('UPDATE notices SET total=total+1, latest=? WHERE kind=?', (int(time.time()), kind))
+        return True
+
+    def publish(self, config, directory, generation):
+        index = self.scope(config)
+        if not index:
+            return
+        with self.connect() as conn:
+            journal_id, = conn.execute('SELECT id FROM receipt_source').fetchone()
+            rows = conn.execute('SELECT generation,data FROM receipts WHERE binding=? AND generation<=? '
+                                'ORDER BY seq', (index['signature'], generation)).fetchall()
+        filtered = []
+        for row_generation, payload in rows:
+            row = json.loads(payload)
+            table = index['tables'].get(row['table_id'])
+            if (table and row['record_id'] in table['records'] and row['field_id'] in table['fields']
+                    and row['update_time'] > table['since'][row['record_id']]):
+                filtered.append(dict(row, generation=row_generation))
+        atomic_json(Path(directory) / gate_events.BATCH, dict(signature=index['signature'], journal_id=journal_id,
+                    generation=generation, rows=filtered))
+
+    def status(self):
+        with self.connect() as conn:
+            row = conn.execute('SELECT generation,ack,last_check,result FROM state').fetchone()
+            status = dict(zip(('received', 'acknowledged', 'last_tick_epoch', 'last_tick_status'), row))
+            status['notices'] = {kind: {'received': total, 'last_epoch': latest}
+                                 for kind, total, latest in conn.execute('SELECT kind,total,latest FROM notices')}
+            status['retained_gate_changes'] = conn.execute('SELECT count(*) FROM receipts').fetchone()[0]
+            return status
+
+    def finish(self, generation, status):
+        with self.connect() as conn:
+            conn.execute('UPDATE state SET ack=max(ack,?),last_check=?,result=?',
+                         (generation if status in ('ran', 'unchanged') else 0, int(time.time()), status))
+
+
+def field(value, key):
+    return value.get(key) if isinstance(value, dict) else getattr(value, key, None)
+
+
+def file_pin_matches(notice, event, key, expected):
+    values = [value for value in (field(notice, key), field(event, key)) if value not in (None, '')]
+    return bool(values) and all(value == expected for value in values)
+
+
+def gate_changes(event, event_id, table_id, open_id, table, listening_since):
+    members = set(table['records'])
+    moved, changes = set(), {}
+    revision, timestamp = field(event, 'revision'), field(event, 'update_time')
+    for action in field(event, 'action_list') or []:
+        record_id = field(action, 'record_id')
+        if not isinstance(record_id, str) or record_id not in members:
+            continue
+        before = field(action, 'before_value') or []
+        after = field(action, 'after_value') or []
+        if (field(action, 'action') == 'record_deleted'
+                or any(field(v, 'field_id') == table['project_field'] for v in [*before, *after])):
+            moved.add(record_id)
+            continue
+        if (field(action, 'action') != 'record_edited' or not isinstance(open_id, str)
+                or not re.fullmatch(r'ou_[a-zA-Z0-9_]{1,128}', open_id)
+                or type(revision) is not int or revision <= 0 or type(timestamp) is not int
+                or timestamp <= max(table.get('since', {}).get(record_id, sys.maxsize), listening_since,
+                                    int(time.time()) - gate_events.MAX_AGE)
+                or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', event_id)):
+            continue
+        for field_id, kind in table['fields'].items():
+            old = [field(v, 'field_value') for v in before if field(v, 'field_id') == field_id]
+            new = [field(v, 'field_value') for v in after if field(v, 'field_id') == field_id]
+            if len(old) != 1 or len(new) != 1:
+                continue
+            try:
+                previous, current = (gate_events.parsed_value(v, kind, table['options']) for v in (old[0], new[0]))
+            except (ValueError, TypeError):
+                continue
+            if previous != current:
+                change = dict(event_id=event_id, table_id=table_id, record_id=record_id, field_id=field_id,
+                              operator_open_id=open_id, event_revision=revision, update_time=timestamp,
+                              before=previous, after=current)
+                key = (record_id, field_id)
+                if key not in changes:
+                    changes[key] = change
+                elif changes[key] != change:
+                    changes[key] = None
+    return moved, [change for change in changes.values() if change]
+
+
+def receive(envelope, config, journal):
+    header, event = field(envelope, 'header'), field(envelope, 'event')
+    event_id, kind = field(header, 'event_id'), field(header, 'event_type')
+    if (field(header, 'app_id') != config['app_id'] or field(header, 'tenant_key') != config['tenant_key']
+            or not nonempty(event_id)):
+        return False
+    if kind == RECORD:
+        table_id = field(event, 'table_id')
+        actor = field(field(event, 'operator_id'), 'open_id')
+        if (field(event, 'file_type') != 'bitable' or field(event, 'file_token') != config['base_token']
+                or table_id not in config['table_ids']):
+            return False
+        index = journal.scope(config)
+        if index and table_id in index['tables']:
+            moved, changes = gate_changes(event, event_id, table_id, actor, index['tables'][table_id],
+                                          journal.started_at)
+            return journal.mark(event_id, kind, index=index, table_id=table_id, moved=moved, changes=changes,
+                                own=(actor == config['bot_open_id']))
+        if actor == config['bot_open_id']:
+            return False
+    elif kind == COMMENT:
+        notice = field(event, 'notice_meta')
+        if (not file_pin_matches(notice, event, 'file_token', config['base_token'])
+                or not file_pin_matches(notice, event, 'file_type', 'bitable')
+                or not nonempty(field(event, 'comment_id'))
+                or field(field(notice, 'to_user_id'), 'open_id') != config['bot_open_id']
+                or field(field(notice, 'from_user_id'), 'open_id') == config['bot_open_id']
+                or field(notice, 'notice_type') not in ('add_comment', 'add_reply')):
+            return False
+    else:
+        return False
+    return journal.mark(event_id, kind)
+
+
+def dispatcher(sdk, config, journal):
+    def handle(envelope):
+        receive(envelope, config, journal)
+    return (sdk.EventDispatcherHandler.builder('', '')
+            .register_p2_drive_file_bitable_record_changed_v1(handle)
+            .register_p2_customized_event(COMMENT, handle).build())
+
+
+def service_secret():
+    directory = os.environ.get('CREDENTIALS_DIRECTORY')
+    secret = ((Path(directory) / 'feishu_app_secret').read_text(encoding='utf-8').strip()
+              if directory else os.environ.get('FEISHU_APP_SECRET'))
+    if not secret:
+        raise ValueError('Missing service credential feishu_app_secret.')
+    return secret
+
+
+def socket_client(config, journal):
+    import lark_oapi as sdk
+    sdk.ws.Client(config['app_id'], service_secret(), event_handler=dispatcher(sdk, config, journal),
+                  log_level=sdk.LogLevel.CRITICAL).start()
+
+
+def pair_dispatcher(sdk, pins, emit):
+    def handle(envelope):
+        header, event = field(envelope, 'header'), field(envelope, 'event')
+        tenant = field(header, 'tenant_key')
+        if (field(header, 'event_type') != RECORD or field(header, 'app_id') != pins['app_id']
+                or not nonempty(field(header, 'event_id')) or not isinstance(tenant, str)
+                or not re.fullmatch(r'[A-Za-z0-9_-]{1,256}', tenant)
+                or field(event, 'file_type') != 'bitable' or field(event, 'file_token') != pins['base_token']
+                or field(event, 'table_id') != pins['table_id']):
+            return
+        actions = field(event, 'action_list')
+        if isinstance(actions, list) and any(nonempty(field(action, 'record_id'))
+                and field(action, 'action') in ('record_added', 'record_edited', 'record_deleted')
+                for action in actions):
+            emit(tenant)
+    return sdk.EventDispatcherHandler.builder('', '').register_p2_drive_file_bitable_record_changed_v1(handle).build()
+
+
+def pair_receiver(pins, sender, timeout):
+    with open(os.devnull, 'wb') as sink:
+        os.dup2(sink.fileno(), 1)
+        os.dup2(sink.fileno(), 2)
+    # Also time out if the calling terminal is killed before it can clean up.
+    signal.alarm(timeout + 5)
+    try:
+        secret = service_secret()
+    except (OSError, ValueError):
+        sender.send_bytes(b'!credential_unavailable')
+        return
+    try:
+        import lark_oapi as sdk
+    except ImportError:
+        sender.send_bytes(b'!sdk_unavailable')
+        return
+    sent = False
+    def emit(tenant):
+        nonlocal sent
+        if not sent:
+            sender.send_bytes(tenant.encode('ascii'))
+            sent = True
+    try:
+        sdk.ws.Client(pins['app_id'], secret, event_handler=pair_dispatcher(sdk, pins, emit),
+                      log_level=sdk.LogLevel.CRITICAL).start()
+    except Exception:
+        if not sent:
+            sender.send_bytes(b'!receiver_failed')
+
+
+def pair(pins, timeout, child_entry=pair_receiver):
+    if (set(pins) != {'app_id', 'base_token', 'table_id'} or not all(nonempty(val) for val in pins.values())
+            or not pins['app_id'].startswith('cli_') or not pins['table_id'].startswith('tbl')
+            or not 1 <= timeout <= 900):
+        raise ValueError('Require an app, a test Base and table, and 1–900 seconds.')
+    ctx = multiprocessing.get_context('spawn')
+    reader, writer = ctx.Pipe(duplex=False)
+    child = ctx.Process(target=child_entry, args=(pins, writer, timeout), daemon=True)
+    def interrupt(*_):
+        raise KeyboardInterrupt
+    previous = signal.signal(signal.SIGTERM, interrupt)
+    try:
+        child.start()
+        writer.close()
+        if not reader.poll(timeout):
+            return {'status': 'timed_out'}
+        try:
+            result = reader.recv_bytes(256)
+        except EOFError:
+            return {'status': 'receiver_exited'}
+        if result in (b'!credential_unavailable', b'!sdk_unavailable', b'!receiver_failed'):
+            return {'status': result[1:].decode('ascii')}
+        if not re.fullmatch(rb'[A-Za-z0-9_-]{1,256}', result):
+            return {'status': 'receiver_failed'}
+        return {'status': 'paired', 'tenant_key': result.decode('ascii')}
+    except KeyboardInterrupt:
+        return {'status': 'interrupted'}
+    finally:
+        reader.close()
+        writer.close()
+        if child.pid is not None:
+            if child.is_alive():
+                child.terminate()
+            child.join(timeout=2)
+            if child.is_alive():
+                child.kill()
+                child.join()
+            child.close()
+        signal.signal(signal.SIGTERM, previous)
+
+
+@contextlib.contextmanager
+def exclusive(path):
+    with path.open('a') as stream:
+        try:
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise ValueError('Another service owns this project or state directory.') from None
+        yield
+
+
+class Schedule:
+    def __init__(self, config):
+        self.config = config
+        self.next_check = 0
+        self.hint_not_before = 0
+
+    def due(self, snapshot, now):
+        if self.config['mode'] != 'dispatch':
+            return False
+        return now >= self.next_check or (snapshot['received'] > snapshot['acknowledged']
+                                          and now >= self.hint_not_before)
+
+    def finished(self, status, now):
+        ok = status in ('ran', 'unchanged')
+        self.next_check = now + self.config['reconcile_seconds' if ok else 'retry_seconds']
+        self.hint_not_before = now + self.config['debounce_seconds'] if ok else self.next_check
+
+
+def tick_status(stream, returncode):
+    if returncode != 0 or stream.tell() > 1024 * 1024:
+        return 'failed'
+    stream.seek(0)
+    try:
+        status = json.load(stream)['status']
+    except (KeyError, TypeError, ValueError, UnicodeError):
+        return 'unknown'
+    return status if status in ('ran', 'unchanged', 'busy', 'paused', 'recovery_required') else 'unknown'
+
+
+def supervise(path, config, journal):
+    stop = False
+    def request_stop(*_):
+        nonlocal stop
+        stop = True
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        signal.signal(sig, request_stop)
+    expected = runner_pins(config) if config['mode'] == 'dispatch' else None
+    schedule = Schedule(config)
+    listener, worker, output = None, None, None
+    next_socket = 0
+    with contextlib.ExitStack() as locks:
+        locks.enter_context(exclusive(Path(config['state_dir']) / 'listen.lock'))
+        if expected:
+            lockdir = Path(expected[0]) / '.lark-dev-workflow'
+            if not Path(expected[0]).is_dir():
+                raise ValueError('Bound workdir does not exist.')
+            lockdir.mkdir(mode=0o700, exist_ok=True)
+            locks.enter_context(exclusive(lockdir / 'event-service.lock'))
+        try:
+            while not stop:
+                now = time.monotonic()
+                if listener and listener.poll() is not None:
+                    print('Feishu receiver exited; will reconnect. Reconciliation remains active.', file=sys.stderr, flush=True)
+                    listener = None
+                    next_socket = now + config['retry_seconds']
+                if listener is None and now >= next_socket:
+                    listener = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '_receive',
+                                                 '--config', str(path)], stdin=subprocess.DEVNULL,
+                                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                if worker and worker.poll() is not None:
+                    status = tick_status(output, worker.returncode)
+                    journal.finish(captured, status)
+                    print('Project tick: ' + status, file=sys.stderr, flush=True)
+                    output.close()
+                    output, worker = None, None
+                    schedule.finished(status, now)
+                if expected and worker is None:
+                    snapshot = journal.status()
+                    if schedule.due(snapshot, now):
+                        if config_from(path) != config or runner_pins(config) != expected:
+                            raise ValueError('Binding changed. Stop and verify the service config.')
+                        captured = snapshot['received']
+                        journal.publish(config, expected[1], captured)
+                        argv = [config['runner_config'] if arg == '{runner_config}' else arg
+                                for arg in config['tick_argv']]
+                        output = tempfile.TemporaryFile()
+                        env = {key: val for key, val in os.environ.items()
+                               if key not in ('FEISHU_APP_SECRET', 'CREDENTIALS_DIRECTORY')}
+                        try:
+                            worker = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=output,
+                                                      stderr=subprocess.DEVNULL, cwd=expected[0], env=env)
+                        except OSError:
+                            output.close()
+                            output = None
+                            journal.finish(captured, 'failed_to_start')
+                            schedule.finished('failed', now)
+                            print('Failed to start the configured tick; will retry.', file=sys.stderr, flush=True)
+                time.sleep(1)
+        finally:
+            if listener and listener.poll() is None:
+                listener.terminate()
+                try:
+                    listener.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    listener.kill()
+                    listener.wait()
+            if worker:
+                worker.wait()
+                journal.finish(captured, tick_status(output, worker.returncode))
+            if output:
+                output.close()
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest='command', required=True)
+    for name in ('check', 'status', 'listen', '_receive'):
+        commands.add_parser(name).add_argument('--config', type=Path, required=True)
+    pairing = commands.add_parser('pair', help='Bounded setup only: identify the tenant from a change in a test table.')
+    for arg in ('app-id', 'base-token', 'table-id'):
+        pairing.add_argument('--' + arg, required=True)
+    pairing.add_argument('--timeout', type=int, default=300, metavar='SECONDS', help='1–900 seconds (default 300).')
+    args = parser.parse_args()
+    os.umask(0o077)
+    try:
+        if args.command == 'pair':
+            result = pair({'app_id': args.app_id, 'base_token': args.base_token, 'table_id': args.table_id}, args.timeout)
+            print(json.dumps(result))
+            return 0 if result['status'] == 'paired' else 1
+        path = args.config.resolve()
+        config = config_from(path)
+        if args.command == 'check':
+            print(json.dumps({'status': 'config_valid', 'mode': config['mode'], 'network_tested': False}))
+            return 0
+        journal = Journal(config)
+        if args.command == 'status':
+            print(json.dumps({'mode': config['mode'], **journal.status()}))
+        elif args.command == '_receive':
+            with exclusive(Path(config['state_dir']) / 'receiver.lock'):
+                socket_client(config, journal)
+        else:
+            supervise(path, config, journal)
+        return 0
+    except (OSError, ImportError, KeyError, ValueError, TypeError, sqlite3.Error) as exc:
+        # Includes SDK credential errors. No event payload, subprocess output or secret enters the journal.
+        print(f'Bridge {args.command} failed ({type(exc).__name__}). Verify config, permissions and dependencies.',
+              file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())

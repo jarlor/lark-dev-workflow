@@ -275,6 +275,8 @@ def run_collector(argv, *, input, capture_output, text, timeout):
 def collect(config, access, *, comments_state_path, runner=run_collector):
     if config.get('documents'):
         fail('本人网页读取首版支持 Base；当前绑定含 Docx，不能跳过后继续。')
+    if watch.comments.bot_actor(config):
+        raise watch.WatchError('助手项目不能退回个人网页身份。')
     watch._binding(config)
     request = {'base': {'token': config['base']['token'], 'url': config['base']['url']},
                'tables': [{'id': table['id'], 'field_ids': [f['id'] for f in table['fields'].values()]}

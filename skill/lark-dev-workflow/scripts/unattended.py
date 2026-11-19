@@ -23,6 +23,7 @@ import watch
 import run_context
 import work_packet
 import own_effects
+import gate_events
 
 HERE = Path(__file__).resolve().parent
 RESULT_SCHEMA = {
@@ -55,10 +56,11 @@ def stable_snapshot(snapshot):
 
 
 def identity(config, binding):
+    control.actor_for_runner(config, binding)
     value = {'binding': comments.binding_identity(binding),
              'tables': binding.get('tables'), 'project_number': binding.get('project_number'),
              'workdir': config['workdir'], 'codex_profile': config.get('codex_profile')}
-    if config['format_version'] == 1:
+    if config['format_version'] != 2:
         # Keep existing CLI identities byte-for-byte compatible with saved state.
         value['lark_profile'] = config['lark_profile']
     else:
@@ -66,9 +68,11 @@ def identity(config, binding):
     return digest(value)
 
 
-def access_context(config):
-    if config['format_version'] == 1:
-        return {'mode': 'cli', 'lark_bin': config['lark_bin'], 'lark_profile': config['lark_profile']}
+def access_context(config, binding):
+    actor = control.actor_for_runner(config, binding)
+    if config['format_version'] != 2:
+        return {'mode': 'cli', 'lark_bin': config['lark_bin'], 'lark_profile': config['lark_profile'],
+                **({k: actor[k] for k in ('identity', 'app_id', 'open_id')} if actor else {})}
     return dict(config['access'])
 
 
@@ -135,6 +139,7 @@ def validate_result(result, run_id, snapshot_id):
 
 def project_governance(config, binding):
     """Read explicit project rules locally; a configured but unreadable source is fatal."""
+    control.actor_for_runner(config, binding)
     governance = binding.get('governance', {})
     if not isinstance(governance, dict):
         raise RunnerError('项目 governance 必须是对象。')
@@ -177,7 +182,7 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
         'run_id': run_id, 'snapshot_id': snapshot_id, 'reason': reason,
         'run_budget': run_budget,
         'skill_file': str(HERE.parent / 'SKILL.md'), 'project_config': config['project_config'],
-        'access': access_context(config), 'snapshot_file': str(snapshot_file),
+        'access': access_context(config, binding), 'snapshot_file': str(snapshot_file),
         'work_packet_file': (str(Path(snapshot_file).with_name('work-packet.json'))
                              if Path(snapshot_file).with_name('work-packet.json').exists() else None),
         'previous_snapshot_file': (str(Path(snapshot_file).with_name('previous-snapshot.json'))
@@ -196,7 +201,9 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
         'recovery_note': state.get('recovery_note'),
         'previous_interrupted_run': (state.get('recoveries') or [{}])[-1].get('inflight'),
     }
-    if config['format_version'] == 1:
+    if state.get('actor_handoff') and not state.get('checkpoint'):
+        context['actor_handoff'] = state['actor_handoff']
+    if config['format_version'] != 2:
         context['lark_profile'] = config['lark_profile']
     return instructions + '\n\n本轮本地配置与输入位置：\n' + json.dumps(context, ensure_ascii=False, indent=2)
 
@@ -294,7 +301,8 @@ def execute(config, state, run_dir, prompt, lock_fd, save_state):
     return read_json(run_dir / 'result.json'), session_id
 
 
-def collect_snapshot(config, binding, directory, collector):
+def collect_snapshot(config, binding, directory, collector, *, inspect_native_stages=False):
+    control.actor_for_runner(config, binding)
     # Use the selected executable itself and retain PATH for its runtime (for example Node).
     old_path = os.environ.get('PATH')
     os.environ['PATH'] = config['path']
@@ -303,8 +311,13 @@ def collect_snapshot(config, binding, directory, collector):
             from browser_watch import collect as browser_collect
             return browser_collect(binding, config['access'],
                                    comments_state_path=directory / 'browser-comments-state.json')
-        return collector(binding, config['lark_profile'],
-                         comments_state_path=directory / 'comments-state.json', lark_bin=config['lark_bin'])
+        options = {'inspect_native_stages': True} if inspect_native_stages else {}
+        snapshot = collector(binding, config['lark_profile'], comments_state_path=directory / 'comments-state.json',
+                             lark_bin=config['lark_bin'], **options)
+        partial = snapshot.get('coverage', {}).get('native_stage_inspection') is not None
+        if partial != inspect_native_stages or bool(snapshot.get('native_stage_inspection')) != inspect_native_stages:
+            raise RunnerError('只读流程检查与完整执行器扫描不能混用。')
+        return snapshot
     finally:
         if old_path is None:
             os.environ.pop('PATH', None)
@@ -312,15 +325,35 @@ def collect_snapshot(config, binding, directory, collector):
             os.environ['PATH'] = old_path
 
 
-def scan_only(config_path, *, collector=watch.collect):
+def scan_only(config_path, *, collector=watch.collect, inspect_native_stages=False):
     config = control.load_config(config_path)
     directory, _, _ = state_paths(config)
     with lock_workspace(config) as lock_fd:
         if lock_fd is None:
             return {'status': 'busy', 'message': '上一轮仍在运行，本轮跳过。'}
-        snapshot = collect_snapshot(config, read_json(config['project_config']), directory, collector)
-        atomic_json(directory / 'last-scan.json', snapshot)
-        return {'status': 'scanned', 'records': len(snapshot.get('records', {})),
+        binding = read_json(config['project_config'])
+        output_dir = directory
+        if inspect_native_stages:
+            if config['format_version'] != 3 or not control.actor_for_runner(config, binding):
+                raise RunnerError('原生流程只读检查只适用于专用助手执行器。')
+            output_dir = directory / 'native-stage-inspection'
+            output_dir.mkdir(mode=0o700, exist_ok=True)
+        scan_started = int(time.time())
+        snapshot = collect_snapshot(config, binding, output_dir, collector, inspect_native_stages=inspect_native_stages)
+        if inspect_native_stages and (control.load_config(config_path) != config
+                                      or read_json(config['project_config']) != binding):
+            raise RunnerError('检查期间项目绑定已变更。请使用当前配置重新检查。')
+        atomic_json(output_dir / 'last-scan.json', snapshot)
+        scope = gate_events.publish_scope(config, binding, snapshot, directory, started_at=scan_started)
+        status = 'scanned'
+        details = {}
+        if inspect_native_stages:
+            status = 'inspected'
+            details = {'message': '已核对记录、评论和流程状态名称。本次未核实线上节点的完成人及必填规则。',
+                       'snapshot_file': str(output_dir / 'last-scan.json'),
+                       'inspected_stage_fields': len(snapshot['native_stage_inspection']),
+                       'event_scope_registered': bool(scope and scope['tables'])}
+        return {'status': status, **details, 'records': len(snapshot.get('records', {})),
                 'comments': len(snapshot.get('comments', {})), 'notices': len(snapshot.get('notices', {})),
                 'coverage': snapshot.get('coverage', {}),
                 'codex_started': False, 'checkpoint_advanced': False}
@@ -374,16 +407,20 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             return {'status': 'recovery_required', 'run_id': state['inflight']['run_id']}
         try:
             project_governance(config, binding)
+            scan_started = int(time.time())
             snapshot = collect_snapshot(config, binding, directory, collector)
             current_config = control.load_config(config_path)
             current_binding = read_json(current_config['project_config'])
-            if identity(current_config, current_binding) != identity(config, binding):
+            if (identity(current_config, current_binding) != identity(config, binding)
+                    or current_config.get('event_tenant_key') != config.get('event_tenant_key')):
                 raise RunnerError('本轮采集期间登录方式、账号或运行绑定已改变；不会继续使用旧快照。')
             snapshot_id = digest(stable_snapshot(snapshot))
             timestamp = clock()
             state['last_scan_at'] = now()
             state['last_observed_snapshot'] = snapshot_id
             baseline = run_context.checkpoint_snapshot(directory, state)
+            scope = gate_events.publish_scope(config, binding, snapshot, directory, started_at=scan_started)
+            gate_rows, gate_checkpoint = gate_events.pending(directory, scope, state)
             run, reason = should_run(state, snapshot_id, timestamp, config['reconcile_interval_seconds'])
             own_only = (reason == 'changed' and matches_own_effects(directory, state, baseline, snapshot_id))
             if own_only:
@@ -391,6 +428,8 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
                 due_state = dict(state, checkpoint=snapshot_id)
                 run, reason = should_run(due_state, snapshot_id, timestamp,
                                          config['reconcile_interval_seconds'])
+            if gate_rows and not run:
+                run, reason = True, 'gate_event_evidence'
             if not run:
                 state['idle_wakes'] = 0
                 state.pop('last_error', None)
@@ -416,7 +455,18 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             if baseline is not None and not optional_json(run_dir / 'previous-snapshot.json', baseline, state):
                 packet_baseline = None
             packet = work_packet.build_work_packet(snapshot, packet_baseline, binding)
-            packet_written = optional_json(run_dir / 'work-packet.json', packet, state)
+            if gate_rows:
+                # The active worker owns this file until it finishes. Archived packets
+                # keep its path and run ID, never an unbounded copy of observed events.
+                evidence_path = directory / gate_events.WORK
+                atomic_json(evidence_path, {**gate_events.evidence_pins(binding, config['event_tenant_key']),
+                                            'run_id': run_id, 'items': gate_rows})
+                packet['gate_event_observations_file'] = str(evidence_path)
+                packet['gate_event_run_id'] = run_id
+                atomic_json(run_dir / 'work-packet.json', packet)
+                packet_written = True
+            else:
+                packet_written = optional_json(run_dir / 'work-packet.json', packet, state)
             previous_session = state.get('session_id')
             session_plan = run_context.prepare_session(state, directory, config['session_max_runs'])
             state['session_runs'] = run_context.session_runs(state, config['session_max_runs'])
@@ -438,6 +488,8 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             save()
             result, session_id = executor(config, state, run_dir, prompt, lock_fd, save)
             validate_result(result, run_id, snapshot_id)
+            if gate_checkpoint:
+                state['gate_event_checkpoint'] = gate_checkpoint
             # Only the START snapshot is delivered. Changes made during execution remain visible.
             state.update(checkpoint=snapshot_id, session_id=session_id,
                          last_result=result, last_success_at=now(), last_success_epoch=clock())
@@ -517,6 +569,9 @@ def parser():
     for name in ['init', 'check', 'scan', 'tick', 'status', 'pause', 'resume', 'recover', 'migrate-binding', 'cron-preview', 'install-cron', 'remove-cron']:
         child = sub.add_parser(name)
         child.add_argument('--config', required=True, type=Path)
+        if name == 'scan':
+            child.add_argument('--inspect-native-stages', action='store_true',
+                               help='专用助手只读核对原生流程类型和状态名称，单独保存检查结果。')
         if name == 'migrate-binding':
             child.add_argument('--candidate', required=True, type=Path)
             child.add_argument('--expected-binding-sha256', required=True)
@@ -525,8 +580,9 @@ def parser():
         if name == 'init':
             child.add_argument('--project-config', required=True, type=Path)
             child.add_argument('--workdir', required=True, type=Path)
-            child.add_argument('--access', choices=('cli', 'browser'), default='cli')
+            child.add_argument('--access', choices=('cli', 'browser', 'bot'), default='cli')
             child.add_argument('--lark-profile')
+            child.add_argument('--event-tenant-key', help='Paired tenant for scoped event evidence (bot only).')
             child.add_argument('--browser-cdp-url')
             child.add_argument('--browser-user-id')
             child.add_argument('--node-bin')
@@ -543,20 +599,22 @@ def main(argv=None):
             output = control.init_config(args.config, args.project_config, args.workdir,
                                          args.lark_profile, args.interval_minutes, args.codex_profile,
                                          access=args.access, browser_cdp_url=args.browser_cdp_url,
-                                         browser_user_id=args.browser_user_id, node_bin=args.node_bin)
+                                         browser_user_id=args.browser_user_id, node_bin=args.node_bin,
+                                         event_tenant_key=args.event_tenant_key)
         elif args.command == 'check':
             config = control.load_config(args.config)
             binding = read_json(config['project_config'])
             project_governance(config, binding)
             watch._binding(binding)
             output = {'status': 'local_config_valid', 'linux': sys.platform.startswith('linux'),
-                      'access': access_context(config),
+                      'access': access_context(config, binding),
                       'coverage': watch.scan_coverage(binding),
                       'remote_access_verified': False, 'cron_installed_verified': False}
         elif args.command in ['tick', 'scan']:
             if not sys.platform.startswith('linux'):
                 raise RunnerError('首版定时执行仅支持 Linux。')
-            output = tick(args.config) if args.command == 'tick' else scan_only(args.config)
+            output = (tick(args.config) if args.command == 'tick' else
+                      scan_only(args.config, inspect_native_stages=args.inspect_native_stages))
         elif args.command in ['status', 'pause', 'resume', 'recover']:
             output = control_state(args.config, args.command)
         elif args.command == 'migrate-binding':

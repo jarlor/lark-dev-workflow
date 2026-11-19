@@ -20,6 +20,8 @@ import sys
 import tempfile
 from urllib.parse import urlsplit, urlunsplit
 
+from onboard import OnboardingError, bot_actor
+
 
 class ControlError(ValueError):
     pass
@@ -102,9 +104,12 @@ def _browser_access(value):
 
 def _validate(value, config_path):
     version = value.get('format_version') if isinstance(value, dict) else None
-    if type(version) is not int or version not in (1, 2):
-        raise ControlError('Runner configuration format_version must be 1 (CLI) or 2 (browser).')
-    expected = CONFIG_FIELDS if version == 1 else BROWSER_CONFIG_FIELDS
+    if type(version) is not int or version not in (1, 2, 3):
+        raise ControlError('Runner configuration format_version must be 1 (user CLI), 2 (browser), or 3 (bot CLI).')
+    expected = BROWSER_CONFIG_FIELDS if version == 2 else CONFIG_FIELDS
+    if version == 3 and 'event_tenant_key' in value:
+        expected = expected | {'event_tenant_key'}
+        _text(value['event_tenant_key'], 'event_tenant_key')
     if set(value) - set(OPTIONAL_CONFIG_FIELDS) != expected:
         missing = sorted(expected - set(value))
         unknown = sorted(set(value) - expected - set(OPTIONAL_CONFIG_FIELDS))
@@ -113,7 +118,7 @@ def _validate(value, config_path):
     for name, default in OPTIONAL_CONFIG_FIELDS.items():
         result[name] = _positive_int(value.get(name, default), name)
     path_fields = ('project_config', 'workdir', 'state_dir', 'python_bin', 'codex_bin')
-    if version == 1:
+    if version != 2:
         path_fields += ('lark_bin',)
     else:
         result['access'] = _browser_access(value['access'])
@@ -135,7 +140,7 @@ def _validate(value, config_path):
     if _inside(workdir, state) or _inside(project, state) or _inside(config_path, state):
         raise ControlError('state_dir must not contain workdir or either configuration file.')
     executables = {name: result[name] for name in ('python_bin', 'codex_bin')}
-    if version == 1:
+    if version != 2:
         executables['lark_bin'] = result['lark_bin']
     else:
         executables['access.node_bin'] = result['access']['node_bin']
@@ -145,8 +150,13 @@ def _validate(value, config_path):
             raise ControlError(f'{name} must name an executable file.')
         if executable in (project, config_path) or _inside(executable, state):
             raise ControlError(f'{name} conflicts with configuration or private state paths.')
-    if version == 1:
+    if version != 2:
         result['lark_profile'] = _text(value['lark_profile'], 'lark_profile')
+    if version == 3:
+        try:
+            actor_for_runner(result, json.loads(project.read_text(encoding='utf-8')))
+        except (OSError, ValueError, OnboardingError) as exc:
+            raise ControlError(f'Cannot validate bot binding: {exc}') from exc
     result['codex_profile'] = _text(value['codex_profile'], 'codex_profile', optional=True)
     result['interval_minutes'] = _interval(value['interval_minutes'])
     for name in ('run_timeout_seconds', 'max_consecutive_runs', 'reconcile_interval_seconds'):
@@ -154,6 +164,15 @@ def _validate(value, config_path):
     entries = _text(value['path'], 'path').split(os.pathsep)
     result['path'] = os.pathsep.join(str(_absolute(item, 'PATH entry')) for item in entries)
     return result
+
+
+def actor_for_runner(config, binding):
+    actor = bot_actor(binding)
+    if bool(actor) != (config['format_version'] == 3):
+        raise ControlError('机器人绑定只能使用 --access bot；个人绑定不能使用助手运行配置。')
+    if actor and config.get('lark_profile') != actor['profile']:
+        raise ControlError('助手运行配置与项目绑定的 profile 不一致。')
+    return actor
 
 
 def load_config(path):
@@ -190,7 +209,7 @@ def _new_json(path, value):
 
 def init_config(path, project_config, workdir, lark_profile=None, interval_minutes=5,
                 codex_profile=None, *, access='cli', browser_cdp_url=None,
-                browser_user_id=None, node_bin=None, which=shutil.which):
+                browser_user_id=None, node_bin=None, which=shutil.which, event_tenant_key=None):
     """Create a new private configuration without touching the project binding."""
     # Reject a dangling link too: resolving first could otherwise create its target.
     try:
@@ -201,15 +220,15 @@ def init_config(path, project_config, workdir, lark_profile=None, interval_minut
     config_path = _absolute(path, 'config_path', base=Path.cwd())
     if config_path.exists() or config_path.is_symlink():
         raise ControlError('Runner configuration already exists; it was not overwritten.')
-    if access not in ('cli', 'browser'):
-        raise ControlError('access must be cli or browser.')
+    if access not in ('cli', 'browser', 'bot'):
+        raise ControlError('access must be cli, browser or bot.')
     if access == 'browser' and lark_profile is not None:
         raise ControlError('Browser access uses the logged-in browser user, not a lark_profile.')
-    if access == 'cli' and any(v is not None for v in (browser_cdp_url, browser_user_id, node_bin)):
+    if access != 'browser' and any(v is not None for v in (browser_cdp_url, browser_user_id, node_bin)):
         raise ControlError('Browser options require --access browser.')
     binaries = {}
     commands = [('python_bin', 'python3'), ('codex_bin', 'codex')]
-    commands += [('lark_bin', 'lark-cli')] if access == 'cli' else [('node_bin', 'node')]
+    commands += [('lark_bin', 'lark-cli')] if access != 'browser' else [('node_bin', 'node')]
     for name, command in commands:
         found = node_bin if name == 'node_bin' and node_bin is not None else which(command)
         if not found:
@@ -226,7 +245,7 @@ def init_config(path, project_config, workdir, lark_profile=None, interval_minut
         access_value = {'mode': 'browser', 'node_bin': binaries.pop('node_bin'),
                         'cdp_url': browser_cdp_url, 'user_id': browser_user_id}
     value = {
-        'format_version': 1 if access == 'cli' else 2,
+        'format_version': {'cli': 1, 'browser': 2, 'bot': 3}[access],
         'project_config': str(_absolute(project_config, 'project_config', base=Path.cwd())),
         'workdir': str(_absolute(workdir, 'workdir', base=Path.cwd())),
         'state_dir': str(config_path.parent / (config_path.stem + '-state')),
@@ -238,7 +257,9 @@ def init_config(path, project_config, workdir, lark_profile=None, interval_minut
         'max_consecutive_runs': 12,
         'reconcile_interval_seconds': 86400,
     }
-    if access == 'cli':
+    if event_tenant_key is not None:
+        value['event_tenant_key'] = event_tenant_key
+    if access != 'browser':
         value['lark_profile'] = lark_profile
     else:
         value['access'] = access_value

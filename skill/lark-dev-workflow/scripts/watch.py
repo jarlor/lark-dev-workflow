@@ -24,9 +24,9 @@ class WatchError(OnboardingError):
 
 
 class Cli(comments.Cli):
-    """Official CLI reads, always under the explicitly selected user profile."""
+    """Official CLI reads under the explicitly selected project profile."""
 
-    def __init__(self, profile, runner=subprocess.run, *, scan_timeout=300, executable='lark-cli'):
+    def __init__(self, profile, runner=subprocess.run, *, scan_timeout=300, executable='lark-cli', actor=None):
         if scan_timeout <= 0:
             raise WatchError('The scan timeout must be positive.')
         if (not isinstance(executable, str) or not executable.strip()
@@ -43,7 +43,7 @@ class Cli(comments.Cli):
             # A resolved npm entrypoint may be named cli.js, so PATH alone cannot pin it.
             return runner([executable, *argv[1:]], **kwargs)
 
-        super().__init__(profile, bounded)
+        super().__init__(profile, bounded, actor=actor)
 
     def fields(self, token, table):
         return self.base.pages('+field-list', 'fields', '--base-token', token,
@@ -60,7 +60,7 @@ class Cli(comments.Cli):
                 for field in fields:
                     argv += ['--field-id', field['id']]
                 argv += ['--format', 'ndjson', '--output', './' + output.name,
-                         '--as', 'user', '--profile', self.profile]
+                         '--as', self.base.operator, '--profile', self.profile]
                 try:
                     result = self.runner(argv, cwd=directory, capture_output=True, text=True, timeout=60,
                                          env=dict(os.environ, LARKSUITE_CLI_NO_UPDATE_NOTIFIER='1',
@@ -78,7 +78,7 @@ class Cli(comments.Cli):
                         or manifest.get('format') != 'ndjson'):
                     raise WatchError('+record-list: expected a v1 NDJSON manifest.')
                 if (manifest.get('base_token') != token or manifest.get('table_id') != table
-                        or manifest.get('identity') not in (None, 'user')):
+                        or manifest.get('identity') not in (None, self.base.operator)):
                     raise WatchError('+record-list: source or operator identity changed.')
                 query = manifest.get('query_context')
                 revision = manifest.get('rev')
@@ -186,7 +186,7 @@ def _binding(config):
     return scope, tables
 
 
-def _fields(cli, config, role, table):
+def _fields(cli, config, role, table, *, inspected=None):
     mapped = table.get('fields')
     if not isinstance(mapped, dict) or not mapped:
         raise WatchError(f'{role}: no mapped fields.')
@@ -195,12 +195,20 @@ def _fields(cli, config, role, table):
             or len(ids) != len(set(ids))):
         raise WatchError(f'{role}: field IDs are missing or duplicated.')
     current = {f['id']: f for f in cli.fields(config['base']['token'], table['id'])}
+    if inspected is not None and any(f['type'] == 'stage' for f in mapped.values()):
+        import native_stage_inspection
+        native = native_stage_inspection.raw_fields(cli, config['base']['token'], table['id'])
     for key, expected in mapped.items():
         actual = current.get(expected['id'])
+        if inspected is not None and expected['type'] == 'stage':
+            inspected[expected['id']] = native_stage_inspection.inspect_field(
+                expected, mapped, actual, native.get(expected['id']))
+            continue
         if not actual or actual.get('type') != expected.get('type'):
             if expected.get('type') == 'stage':
-                raise WatchError(f'{role}.{key}: 未读到可核实的流程字段结构；普通单选读数不能代替流程校验。'
-                                 '请使用已验证的本人网页读取，核对绑定后再继续。')
+                next_step = ('请保留待办，待助手能核实流程节点后再安排开发。' if 'cli_actor' in config
+                             else '请使用已验证的本人网页读取，核对绑定后再继续。')
+                raise WatchError(f'{role}.{key}: 还不能核实流程节点，普通单选值无法说明谁能放行。{next_step}')
             raise WatchError(f'{role}.{key}: field is missing or its type changed; recheck the project binding.')
         if expected.get('type') == 'stage' and not isinstance(actual.get('stage_config'), dict):
             raise WatchError(f'{role}.{key}: 未完整读取流程节点配置，不能安排工作。')
@@ -245,7 +253,7 @@ def _feedback_options(field, number):
     return sorted(name for name in names if pattern.fullmatch(name))
 
 
-def _read_records(config, cli, scope, tables, *, stage_fields=None):
+def _read_records(config, cli, scope, tables, *, stage_fields=None, gate_status_options=None, inspection=None):
     snapshot = {}
     token, project_id = config['base']['token'], scope['project_record_id']
     intake_mode = feedback_intake_mode(config)
@@ -253,12 +261,26 @@ def _read_records(config, cli, scope, tables, *, stage_fields=None):
     roles = ['projects', *sorted(role for role in tables if role != 'projects')]
     for role in roles:
         table = tables[role]
-        current = _fields(cli, config, role, table)
+        inspected = {} if inspection is not None else None
+        current = _fields(cli, config, role, table, inspected=inspected)
         fields = list(table['fields'].values())
+        if inspected:
+            # Record-list's NDJSON manifest describes the CLI projection, not the native field type.
+            fields = [dict(f, type=inspected[f['id']]['cli_type']) if f['id'] in inspected else f for f in fields]
+            inspection.update({f"{table['id']}/{fid}": details for fid, details in inspected.items()})
         if stage_fields is not None:
             for field in fields:
                 if field.get('type') == 'stage':
                     stage_fields[f"{table['id']}/{field['id']}"] = copy.deepcopy(current[field['id']])
+        if gate_status_options is not None and role in ('requirements', 'bugs', 'work'):
+            status = table['fields'].get('status', {})
+            if status.get('type') in ('stage', 'select'):
+                observed = current[status['id']]
+                if ((observed.get('type') == status['type'] or (inspected and status['id'] in inspected))
+                        and isinstance(observed.get('options'), list)):
+                    gate_status_options[f"{table['id']}/{status['id']}"] = [
+                        {key: value[key] for key in ('id', 'name') if key in value}
+                        if isinstance(value, dict) else value for value in observed['options']]
         if role == 'projects':
             rows = [cli.read_record(token, table['id'], project_id, fields)]
             number = table['fields'].get('number')
@@ -298,6 +320,11 @@ def _read_records(config, cli, scope, tables, *, stage_fields=None):
                     or set(values) != {f['id'] for f in fields}
                     or (role == 'projects' and identifier != project_id)):
                 raise WatchError(f'{role}: incomplete record readback.')
+            for fid, details in (inspected or {}).items():
+                value = values[fid]
+                if value is not None and (not isinstance(value, list) or len(value) > 1
+                                          or any(name not in details['options'] for name in value)):
+                    raise WatchError(f'{role}: 流程字段值不在本次核实的状态选项中。')
             key = f"{table['id']}/{identifier}"
             if key in snapshot:
                 raise WatchError(f'{role}: duplicate record across queries; retry a fresh scan.')
@@ -318,6 +345,8 @@ def _comment_snapshot(state):
             value['content'] = {k: copy.deepcopy(observed.get(k)) for k in (
                 'resource_type', 'resource_token', 'comment_id', 'reply_id', 'root_reply',
                 'author', 'body', 'text', 'create_time', 'update_time', 'raw_reply_extra')}
+            if comments.assistant_authored(state, observed):
+                value['content']['assistant_authored'] = True
             value['location'] = {k: copy.deepcopy(v) for k, v in location.items()
                                  if k not in ('document_revision', 'mapping_evidence')}
             value['thread'] = {k: context['snapshot']['thread'].get(k)
@@ -334,16 +363,18 @@ def _comment_snapshot(state):
     return included, notices
 
 
-def collect(config, profile, *, comments_state_path, locations=None, lark_bin='lark-cli'):
+def collect(config, profile, *, comments_state_path, locations=None, lark_bin='lark-cli', inspect_native_stages=False):
     try:
         _binding(config)
-        reader = Cli(profile, executable=lark_bin)
+        reader = Cli(profile, executable=lark_bin, actor=comments.bot_actor(config))
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
         raise WatchError(f'Project snapshot failed ({type(exc).__name__}); keep the previous checkpoint.') from exc
-    return collect_with_reader(config, reader, comments_state_path=comments_state_path, locations=locations)
+    return collect_with_reader(config, reader, comments_state_path=comments_state_path, locations=locations,
+                               inspect_native_stages=inspect_native_stages)
 
 
-def collect_with_reader(config, reader, *, comments_state_path, locations=None, reader_identity=None):
+def collect_with_reader(config, reader, *, comments_state_path, locations=None, reader_identity=None,
+                        inspect_native_stages=False):
     """Return a stable snapshot, committing only complete comment observations.
 
     ``locations`` is the existing comments.py format-1 location-evidence object.
@@ -352,6 +383,8 @@ def collect_with_reader(config, reader, *, comments_state_path, locations=None, 
     """
     try:
         scope, tables = _binding(config)
+        if inspect_native_stages and not comments.bot_actor(config):
+            raise WatchError('原生流程只读检查需要已绑定的专用助手。')
         known = comments.load_locations(locations)
         with comments.locked(comments_state_path):
             previous = comments.load_state(comments_state_path, config)
@@ -363,8 +396,13 @@ def collect_with_reader(config, reader, *, comments_state_path, locations=None, 
                     raise WatchError('Existing comment observations belong to another reader identity; '
                                      'preserve the journal and reconcile before switching accounts or backends.')
                 previous['reader_identity'] = copy.deepcopy(reader_identity)
-            stage_fields = {}
-            records = _read_records(config, reader, scope, tables, stage_fields=stage_fields)
+            inspected = {} if inspect_native_stages else None
+            stage_fields = None if inspect_native_stages else {}
+            gate_options = {} if config.get('cli_actor', {}).get('identity') == 'bot' else None
+            records = _read_records(config, reader, scope, tables, stage_fields=stage_fields,
+                                    gate_status_options=gate_options, inspection=inspected)
+            if inspect_native_stages and not inspected:
+                raise WatchError('项目没有绑定原生流程字段。')
             updated, report = comments.scan(config, previous, reader, include_resolved=True, known=known)
             if report['status'] != 'complete':
                 raise WatchError('Comment scan failed; previous observations were kept: ' + report['error'])
@@ -372,8 +410,14 @@ def collect_with_reader(config, reader, *, comments_state_path, locations=None, 
             snapshot = {'format_version': 1, 'binding': comments.binding_identity(config),
                         'records': records, 'comments': observed, 'notices': notices,
                         'coverage': scan_coverage(config)}
+            if inspected:
+                snapshot['coverage']['native_stage_inspection'] = {
+                    'node_settings_verified': False, 'dispatch_verified': False}
+                snapshot['native_stage_inspection'] = inspected
             if stage_fields:
                 snapshot['stage_fields'] = stage_fields
+            if gate_options:
+                snapshot['gate_status_options'] = gate_options
             atomic_json(Path(comments_state_path), updated)
             return snapshot
     except (OSError, ValueError, TypeError, KeyError, AttributeError, IndexError) as exc:
