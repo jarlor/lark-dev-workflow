@@ -17,6 +17,16 @@ import workflow_rule as module
 import event_bridge as bridge
 
 
+REQUEST_CASES = {
+    'req-start': ('requirements', '需求开始研发', '可研发', '研发中', ('work',)),
+    'req-accept': ('requirements', '需求发起验收', '研发中', '待验收', ('work', 'acceptor', 'verification')),
+    'bug-start': ('bugs', 'Bug开始修复', '可研发', '研发中', ('work', 'baseline', 'reproduction_tests')),
+    'bug-accept': ('bugs', 'Bug发起验收', '研发中', '待验收', ('work', 'acceptor', 'retest_tests')),
+    'work-start': ('work', '研发项开始执行', '可开始', '进行中', ('plan', 'scope', 'deliverable', 'verification_plan')),
+    'work-deliver': ('work', '研发项交付', '进行中', '已交付', ('summary',)),
+}
+
+
 class WorkflowRuleTests(RuntimeFixture):
     def setUp(self):
         super().setUp()
@@ -161,7 +171,7 @@ class WorkflowRuleTests(RuntimeFixture):
         self.assertEqual(argv[argv.index("--as") + 1], "bot")
         self.assertEqual(argv[argv.index("--profile") + 1], self.actor["profile"])
         if argv[1:3] == ["api", "GET"]:
-            self.assertEqual(argv[3], "/open-apis/bitable/v1/apps/FixtureBase/tables/tblWork/fields")
+            self.assertEqual(argv[3], f"/open-apis/bitable/v1/apps/FixtureBase/tables/{self.rule['table_id']}/fields")
             data = dict(items=self.raw, total=len(self.raw), has_more=False)
         else:
             self.assertEqual(argv[1:3], ["base", "+workflow-get"])
@@ -353,6 +363,192 @@ class WorkflowRuleTests(RuntimeFixture):
         self.assertTrue(result['fixed_bot_owner_verified'], result)
         self.assertIsNone(result['source_ai_in_project_contract'])
         self.assertFalse(result['dispatch_checked'] or result['project_scope_verified'])
+
+    def set_stage_request(self, key):
+        role, marker, source, target, required = REQUEST_CASES[key]
+        work = role == 'work'
+        table = {'requirements': 'tblRequirements', 'bugs': 'tblBugs', 'work': 'tblWork'}[role]
+        title = '示例规则'
+        states = ['待确认计划', '可开始', '进行中', '已交付'] if work else ['待确认', '可研发', '研发中', '待验收', '已验收']
+        options = [dict(name=n, id='optStage' + str(i)) for i, n in enumerate(states + ['已撤回'])]
+        status = dict(id='fldStage', name='状态', type='stage', multiple=False, options=options)
+        source_option, target_option = (next(o for o in options if o['name'] == n) for n in (source, target))
+        steps = [dict(name=n, actor='ai' if i in (1, 2) else 'human',
+                      person_field='owner' if work and i in (1, 2) else None,
+                      required_fields=['summary'] if work and i == 2 else []) for i, n in enumerate(states[:-1])]
+        mapped = {'status': dict(status, stage_contract=dict(steps=steps, done=states[-1], cancelled='已撤回'))}
+        fields = [status, dict(id='fldMarker', name='助手请求', type='text')]
+        raw = [dict(field_id='fldStage', type=24, ui_type='Stage'), dict(field_id='fldMarker', type=1)]
+        self.binding['tables']['verification'] = dict(id='tblTests', fields={})
+        self.binding['tables']['projects']['fields']['number'] = dict(id='fldNumber', type='text')
+        def add(k, name, kind, raw_code, **extra):
+            fid = 'fld' + k.replace('_', '').title()
+            f = dict(id=fid, name=name, type=kind, **extra)
+            mapped[k] = f
+            fields.append(dict(f))
+            raw.append(dict(field_id=fid, type=raw_code))
+            return fid
+        project = add('project', '所属项目', 'link', 18, target_table_id='tblProjects',
+                      link_table={'id': 'tblProjects'}, multiple=True)
+        raw[-1]['property'] = dict(table_id='tblProjects', multiple=True)
+        req = dict(key=key, purpose=module.STAGE_REQUEST, role=role, workflow_id='wkfExample', table_id=table,
+                   table_name='示例表', title=title, marker_field_id='fldMarker', marker_text=marker,
+                   stage_field_id='fldStage', source=source_option, target=target_option,
+                   guard=dict(kind='project_link', field_id=project, value='recProject'),
+                   owner_field_id=None, owner_match='none', authored_by=self.actor['open_id'], required_field_ids=[])
+        filters = [module.condition('所属项目', 'is', [dict(value_type='text', value='recProject')]),
+                   module.condition('状态', 'is', [dict(value_type='option', value=source_option)])]
+        for k, name, selected in [('nature', '记录性质', '当前工作'), ('processing', '处理情况', '正常')]:
+            option = dict(id='opt' + k.title(), name=selected)
+            req[k + '_field_id'] = add(k, name, 'select', 3, multiple=False, options=[option])
+            req[k + '_option'] = option
+            raw[-1].update(ui_type='SingleSelect', property={'options': [dict(option)]})
+            filters.append(module.condition(name, 'is', [dict(value_type='option', value=option)]))
+        # Include the complete stage contract even when inspecting only the first work transition.
+        field_keys = list(required)
+        if work and 'summary' not in field_keys:
+            field_keys.append('summary')
+        for k in field_keys:
+            if k in module.LINK_ROLES:
+                linked = self.binding['tables'][module.LINK_ROLES[k]]['id']
+                fid = add(k, k, 'link', 18, target_table_id=linked, link_table={'id': linked})
+                raw[-1]['property'] = {'table_id': linked}
+            elif k == 'acceptor':
+                fid = add(k, k, 'user', 11, multiple=False)
+            else:
+                fid = add(k, k, 'text', 1)
+            if k in required:
+                req['required_field_ids'].append(fid)
+                filters.append(module.condition(k, 'isNotEmpty', []))
+        user = [dict(value_type='user', value={'id': self.actor['open_id'], 'name': '示例助手'})]
+        if work:
+            req.update(owner_field_id=add('owner', '负责人', 'user', 11, multiple=False), owner_match='bound_assistant')
+            raw[-1].update(ui_type='User', property={'multiple': False})
+            filters.append(module.condition('负责人', 'is', copy.deepcopy(user)))
+        self.binding['tables'][role] = dict(id=table, fields=mapped)
+        self.rule, self.raw, self.fields = req, raw, fields
+        self.names = {f['id']: f['name'] for f in fields}
+        self.trigger.update(next='branch')
+        watched = module.condition('助手请求', 'is', [dict(value_type='text', value=marker)])
+        self.trigger['data'].update(table_name='示例表', field_watch_info=[watched],
+                                    record_watch_info=dict(conjunction='and', conditions=filters))
+        self.action['data'].update(table_name='示例表', field_values=[dict(field_name='状态', value=[
+            dict(value_type='option', value=target_option)])])
+        comparison = dict(left_value=dict(value_type='ref', value='$.trigA.recordModifiedUser'),
+                          operator='is', right_value=user)
+        branch = dict(id='branch', type='IfElseBranch', children={'links': [
+            dict(kind='if_true', to='actA'), dict(kind='if_false', to='wait')]},
+            data=dict(condition=dict(conjunction='or', conditions=[dict(conjunction='and', conditions=[comparison])])))
+        delay = dict(id='wait', type='Delay', children={'links': []}, data={'duration': 1})
+        self.definition.update(title=title, steps=[self.trigger, branch, self.action, delay])
+        self.service['table_ids'] = [table]
+        write_json(self.service_path, self.service)
+        write_json(self.project_path, self.binding)
+        self.reader.fields.return_value = fields
+        self.reader.base.pages.return_value = [dict(id=table, name='示例表')]
+        self.reader.read_record.return_value = {'record_id': 'recProject', 'values': {'fldNumber': 'PRJ-0001'}}
+        self.pin()
+
+    def test_six_stage_request_definitions(self):
+        for key in REQUEST_CASES:
+            with self.subTest(key=key):
+                self.set_stage_request(key)
+                result = self.verify()
+                self.assertTrue(result['definition_matches'], result)
+                self.assertTrue(result['project_condition_verified'] and result['trigger_modifier_verified'])
+                self.assertIs(result['new_marker_value_verified'], True)
+                self.assertFalse(result['project_scope_verified'] or result['dispatch_checked'] or result['business_evidence_checked'])
+                self.assertEqual(result['fixed_bot_owner_verified'], self.rule['role'] == 'work')
+
+    def test_stage_request_graph_rejects_other_authors_fallback_writes_and_weaker_filters(self):
+        self.set_stage_request('work-deliver')
+        mutations = [
+            lambda t, b, a, d: b['data']['condition']['conditions'][0]['conditions'][0]['left_value'].update(value='$.trigA.recordCreatedUser'),
+            lambda t, b, a, d: b['data']['condition']['conditions'][0]['conditions'][0]['right_value'][0]['value'].update(id='ou_other'),
+            lambda t, b, a, d: b['data']['condition']['conditions'].append({'conjunction': 'and', 'conditions': []}),
+            lambda t, b, a, d: b['children']['links'][1].update(to='actA'),
+            lambda t, b, a, d: d.update(next='actA'),
+            lambda t, b, a, d: d.update(type='SetRecordAction'),
+            lambda t, b, a, d: d['data'].update(duration=True),
+            lambda t, b, a, d: a['data'].update(ref_info={'step_id':'branch'}),
+            lambda t, b, a, d: t['data']['field_watch_info'][0]['value'][0].update(value='研发项开始执行'),
+            lambda t, b, a, d: t['data']['record_watch_info']['conditions'].pop(-2),
+            lambda t, b, a, d: t['data']['record_watch_info']['conditions'][-1].update(operator='isNotEmpty', value=[]),
+        ]
+        for mutate in mutations:
+            draft = copy.deepcopy(self.definition)
+            with self.subTest(mutate=mutate), self.assertRaises(module.Unverified):
+                mutate(*draft['steps'])
+                module.check_graph(draft, self.rule, '示例表', self.names, bot_open_id=self.actor['open_id'])
+
+    def test_request_value_checked_only_on_the_new_marker_value(self):
+        self.set_stage_request('req-start')
+        trigger = self.trigger['data']
+        watch = trigger['field_watch_info']
+        exact = copy.deepcopy(watch[0])
+        for before_condition, watched in [
+                (True, {'field_name': '助手请求'}), (True, exact), (False, {'field_name': '助手请求'}),
+                (False, dict(exact, operator='contains')), (False, dict(exact, value=[]))]:
+            with self.subTest(before=before_condition, watched=watched):
+                watch[:] = [watched]
+                conditions = trigger['record_watch_info']['conditions']
+                if before_condition:
+                    conditions.append(exact)
+                try:
+                    self.pin()
+                    result = self.verify()
+                    self.assertFalse(result['definition_matches'])
+                    self.assertNotIn('new_marker_value_verified', result)
+                finally:
+                    if before_condition:
+                        conditions.pop()
+
+    def test_stage_request_checks_live_option_ids_evidence_links_and_project_binding(self):
+        self.set_stage_request('bug-accept')
+        cases = [('fldNature', 'property', {'options':[{'id':'optOther','name':'当前工作'}]}),
+                 ('fldRetesttests','property',{'table_id':'tblProjects'}), ('fldAcceptor','type',1)]
+        for fid,k,value in cases:
+            f = next(f for f in self.raw if f['field_id'] == fid)
+            with self.subTest(fid=fid), mock.patch.dict(f,{k:value}):
+                self.assertFalse(self.verify()['definition_matches'])
+        self.rule['required_field_ids'].pop()
+        self.trigger['data']['record_watch_info']['conditions'].pop()
+        self.pin()
+        self.assertFalse(self.verify()['definition_matches'])
+
+    def test_stage_request_project_predicate_and_single_project_are_distinct(self):
+        self.set_stage_request('req-start')
+        project = self.rule['guard']['field_id']
+        field = next(f for f in self.fields if f['id'] == project)
+        raw = next(f for f in self.raw if f['field_id'] == project)
+        field['multiple'] = False
+        self.assertFalse(self.verify()['project_scope_verified'])
+        raw['property']['multiple'] = False
+        result = self.verify()
+        self.assertTrue(result['project_condition_verified'] and result['project_scope_verified'], result)
+        filters = self.trigger['data']['record_watch_info']['conditions']
+        filters[0]['value'][0]['value'] = 'recNeighbor'
+        self.rule['guard']['value'] = 'recNeighbor'
+        self.pin()
+        result = self.verify()
+        self.assertFalse(result['project_scope_verified'] or result['definition_matches'])
+
+    def test_stage_request_refuses_draft_lookup_graph_and_current_human_node(self):
+        self.set_stage_request('req-start')
+        # Read-only seed: a wait instead of the true branch's single permitted state change.
+        self.definition['steps'][2] = dict(id='actA', type='Delay', children={'links': []}, data={'duration': 1})
+        self.pin()
+        self.assertFalse(self.verify()['definition_matches'])
+        self.definition['steps'][2] = self.action
+        self.definition['steps'].append(dict(id='find', type='FindRecordAction', children={'links': []}, data={}))
+        self.pin()
+        self.assertFalse(self.verify()['definition_matches'])
+        self.definition['steps'].pop()
+        steps = self.binding['tables']['requirements']['fields']['status']['stage_contract']['steps']
+        steps[1]['actor'] = 'human'
+        write_json(self.project_path, self.binding)
+        self.pin()
+        self.assertFalse(self.verify()['definition_matches'])
 
     def test_live_link_and_record_prove_only_the_project_condition(self):
         self.set_project_guard()

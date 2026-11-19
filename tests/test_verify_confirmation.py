@@ -86,8 +86,9 @@ class ConfirmationTests(RuntimeFixture):
                                              after_value=[dict(field_id='fldStage',field_value=json.dumps(after))])]))
         bridge.receive(envelope, self.service, self.journal)
 
-    def verify(self):
-        return verifier.verify(self.service_path, self.role, 'recWork', reader_factory=lambda *a, **k: self.reader)
+    def verify(self, **kwargs):
+        return verifier.verify(self.service_path, self.role, 'recWork', reader_factory=lambda *a, **k: self.reader,
+                               **kwargs)
 
     def test_retained_original_event_is_reread_and_must_match_row_and_current_history(self):
         with self.journal.connect() as db:
@@ -241,3 +242,69 @@ class ConfirmationTests(RuntimeFixture):
             return self.history_page(command,*args)
         self.reader.base.read.side_effect = stale_head
         self.assertEqual(self.verify()['status'], 'pending')
+
+    def acceptance_fixture(self, role):
+        self.binding['tables'][role], self.binding['tables'][self.role] = (
+            self.binding['tables'][self.role], self.binding['tables'][role])
+        self.role = role
+        self.fields['revision'] = {'id': 'fldRevision', 'type': 'number'}
+        self.fields['acceptor'] = {'id': 'fldAcceptor', 'type': 'user'}
+        self.fields['summary'] = {'id': 'fldDelivery', 'type': 'text'}
+        self.steps[:] = [
+            dict(name='待确认', actor='human', person_field='plan_confirmer', required_fields=[]),
+            dict(name='可研发', actor='ai', person_field=None, required_fields=[]),
+            dict(name='研发中', actor='ai', person_field=None, required_fields=[]),
+            dict(name='待验收', actor='human', person_field='acceptor', required_fields=[]),
+        ]
+        status = self.fields['status']
+        status['stage_contract']['done'] = '已验收'
+        status['options'] = [{'name': s['name']} for s in self.steps] + [{'name': '已验收'}, {'name': '已取消'}]
+        self.reader.options = copy.deepcopy(status['options'])
+        self.row.update(fldRevision=4, fldAcceptor=[{'id': 'ou_person', 'name': '小吴'}],
+                        fldStage=['已验收'], fldDelivery='')
+        self.change.update(before='待验收', after='已验收')
+        write_json(self.project_path, self.binding)
+        with self.journal.connect() as conn:
+            conn.execute('DELETE FROM receipts')
+        with mock.patch.object(gate_events.time, 'time', return_value=self.now - 10):
+            snapshot = watch.collect_with_reader(self.binding, self.reader, inspect_native_stages=True,
+                comments_state_path=self.directory/role/'comments.json')
+            gate_events.publish_scope(self.config, self.binding, snapshot, self.directory)
+        self.event(event_id='evtAccept' + role, before='optBefore', after='optDone')
+
+    def test_final_click_for_each_role_is_bound_to_revision_and_never_proves_delivery(self):
+        for role in ('requirements', 'bugs'):
+            with self.subTest(role=role):
+                self.acceptance_fixture(role)
+                result = self.verify(acceptance_revision=4)
+                self.assertEqual((result['status'], result['check'], result.get('business_revision')),
+                                 ('click_verified', 'acceptance_node_click', 4), result)
+                for flag in ('dispatch_checked', 'delivery_evidence_checked', 'independent_retest_checked',
+                             'release_checked', 'feedback_closure_checked'):
+                    self.assertIs(result[flag], False)
+                self.assertEqual(self.verify()['status'], 'pending')
+                self.assertEqual(self.verify(acceptance_revision=3)['status'], 'pending')
+                self.assertEqual(self.verify(acceptance_revision=True)['status'], 'pending')
+
+    def test_acceptance_refuses_missing_event_wrong_acceptor_or_changed_delivery(self):
+        self.acceptance_fixture('bugs')
+        self.row['fldAcceptor'][0]['id'] = 'ou_same_display_name'
+        self.assertEqual(self.verify(acceptance_revision=4)['status'], 'pending')
+        self.row['fldAcceptor'][0]['id'] = 'ou_person'
+        for fid in ('fldRevision', 'fldAcceptor', 'fldProject', 'fldDelivery', 'fldRetestLink'):
+            with self.subTest(fid=fid):
+                self.entries.insert(0, dict(activity_type='update', rev=21, create_time=self.now - 3,
+                                            field_changes=[dict(field_id=fid)]))
+                self.assertEqual(self.verify(acceptance_revision=4)['status'], 'pending')
+                self.entries.pop(0)
+        self.change['before'] = '研发中'
+        self.assertEqual(self.verify(acceptance_revision=4)['status'], 'pending')
+        self.change['before'] = '待验收'
+        with self.journal.connect() as conn:
+            conn.execute('DELETE FROM receipts')
+        self.assertEqual(self.verify(acceptance_revision=4)['status'], 'pending')
+
+    def test_work_item_delivery_is_not_a_final_human_acceptance(self):
+        result = self.verify(acceptance_revision=2)
+        self.assertEqual(result['status'], 'pending')
+        self.reader.base.read.assert_not_called()

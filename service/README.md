@@ -88,6 +88,15 @@ python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/brid
 
 `verified` 表示这条记录的这一版已由指定人员账号完成该步。工具只核对本行字段。范围或计划引用外部说明时，须另查当时和现在的文档版本。安排开发前仍需查上游范围、Bug 复现、项目约定和依赖。如果原事项已经保存了同一版本的可靠确认依据，可以继续使用。接收器保留新事件的时间有限，记录过期不会撤销已有确认，也不用请人再点一次。
 
+要核对需求或 Bug 的最后一次验收点击，请指定送验时的业务修订号。例如，下面的命令核对第 4 版需求。Bug 使用 `--role bugs`。
+
+```sh
+python3 service/verify_confirmation.py --config "$bridge_config" \
+  --role requirements --record-id "$record_id" --acceptance-click 4
+```
+
+`click_verified` 表示该行指定的验收人亲自把这一版事项从「待验收」推进到「已验收」。它核对本行的修改通知、人员账号、修订号和记录历史。缺少通知、当前修订不同、同次或随后改过验收人或交付资料时，返回 `pending`。核实具体构建和测试环境、独立复测结果、正式发布或关联反馈的闭环情况，需要另查对应的交付与验收记录。
+
 ### 核对 AI 更新节点的规则
 
 服务器可用专用助手读回飞书里已保存的新版工作流。先运行 `python3 service/workflow_rule.py --config /etc/lark-dev-workflow/demo/bridge.json --show-binding`，将输出的 `service` 和 `runner` 保存在该服务状态目录的 `ai-node-rules.json`，权限设为 0600。在同一文件的 `rules` 中按名称登记要检查的规则。下面的编号仅示意格式，安装时使用本副本的真实编号。
@@ -119,6 +128,33 @@ python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/brid
 若该节点由本行负责人办理，在飞书把条件设为“负责人等于研发助手”，并在本地这条规则里填写 `owner_field_id` 和 `"owner_match": "bound_assistant"`。检查器会核对它是单人字段，并用已绑定的助手账号 ID 比对规则。完全匹配时返回 `fixed_bot_owner_verified=true`。只要求“负责人不为空”的旧规则返回 false。规则检查为只读。验证实际效果时，在测试副本分别用助手、同事、无人负责的记录试一次，再重放一次助手的触发。核对只有助手那条进入下一步，并在该行历史里查到一次状态变化。
 
 读取规则需要应用权限 `base:workflow:read`。使用飞书 CLI 修改、启用或停用已有规则还需要 `base:workflow:update`。安装 Skill 本身不授予这项权限。
+
+#### 核对是谁提交了助手请求
+
+当一张表用「助手请求」触发流程时，每条规则单独登记 `"purpose": "assistant_stage_request"`。用上面的 `--rule` 命令逐条检查。检查器读取飞书保存的定义、实际字段和绑定项目，两次读回一致才给出结果。它只接受下表中的六种请求。
+
+| 登记键（`key`） | 「助手请求」填什么 | 哪一步到哪一步 | 哪些字段必须有值 |
+|---|---|---|---|
+| `req-start` | 需求开始研发 | 可研发 → 研发中 | 关联研发项 |
+| `req-accept` | 需求发起验收 | 研发中 → 待验收 | 关联研发项、验收人、验收记录 |
+| `bug-start` | Bug开始修复 | 可研发 → 研发中 | 修复研发项、复现基线、复现测试 |
+| `bug-accept` | Bug发起验收 | 研发中 → 待验收 | 修复研发项、验收人、修复后复测 |
+| `work-start` | 研发项开始执行 | 可开始 → 进行中 | 研发计划、工作范围、约定交付物、验证方式 |
+| `work-deliver` | 研发项交付 | 进行中 → 已交付 | 交付与进展 |
+
+登记项沿用上面的工作流、表和字段编号，另外填写 `key`、工作流的 `title`、`table_name`、`marker_text`，并把提交请求的助手 open_id 填入 `authored_by`。`guard` 使用 `project_link` 并固定本项目的记录编号。可选的 `project_filter_mode` 只接受 `trigger_project_id`。
+
+`nature_field_id` 和 `processing_field_id` 分别指向记录性质和处理情况，`nature_option` 和 `processing_option` 分别填写「当前工作」和「正常」的真实 `id`、`name`。`source` 和 `target` 填写该副本实际核实的节点编号和名称，`required_field_ids` 填上表对应的本表字段编号。研发项使用 `owner_match=bound_assistant` 和单人负责人字段。需求和 Bug 使用 `owner_match=none`、`owner_field_id=null`。
+
+在「助手请求」的字段监听条件（`field_watch_info`）中选择「等于」，填该动作的完整文字。它核对本次新填的值。`record_watch_info` 比较修改前的值，只用来筛选项目、起始步骤、记录性质、处理情况、负责人和该步必填项。把动作文字放在那里会让从空白填入请求时漏触发，清空旧请求时反而可能推进。旧版按这种写法得到的核对结果不能用于启用规则。实际执行时，一次只写「助手请求」这一列，避免同时改变筛选依据。
+
+只有当这次改动来自绑定助手，才能把触发行推进一步。其他人填写同样的文字时，另一条分支只等待一分钟就结束。`new_marker_value_verified` 与 `trigger_modifier_verified` 分别表示已核对新填的文字条件和修改人判断。`project_condition_verified` 表示规则比较了当前绑定的项目编号；若项目字段允许多选，还要用同时关联两个项目的记录验证行为。此时 `project_scope_verified` 保持 false。
+
+字段有值只能证明有人填过。发起请求前，执行器仍须核实本版的人工确认、关联事项的实际进度，以及适用构建的复现、自测和验收依据。停用规则也可以检查，`enabled` 单独表示是否启用。`dispatch_checked` 保持 false。
+
+测试副本和正式表共用一个飞书应用时，切换前先停测试接收器。飞书会把每个事件分给其中一个连接。两个服务各自只处理自己的表时，事件可能分到另一边。切换后，用正式表的一次真实变化核对服务确实收到了通知。[飞书长连接说明](https://open.feishu.cn/document/ukTMukTMukTM/uYDNxYjL2QTM24iN0EjN/event-subscription-configure-)
+
+检查正式表的记录通知时，要用本项目的助手查询这份表的事件订阅。助手能编辑表或收到评论，仍需另查记录通知。飞书要求应用是文件所有者或可管理协作者。查询被拒时，保留原来的处理方式。是否给助手增加这份表的管理权限，由文件所有者决定。[飞书文件事件订阅](https://open.feishu.cn/document/server-docs/docs/drive-v1/event/subscribe.md)
 
 ## 启动同一个执行器
 

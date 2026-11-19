@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.2.1",
+    "skill_version": "2.3.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -96,7 +96,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 454,
+  "automated_tests_passed": 464,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -108,7 +108,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.1",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.3.0",
   "documentation_updated_on": "2026-11-19",
   "validation_history": {
     "1.1.0": {
@@ -398,34 +398,56 @@
       ],
       "target_linux_installed": false,
       "installation_note": "The candidate ran against an isolated test copy. The production project had not switched at packaging."
+    },
+    "2.2.1": {
+      "date": "2026-11-19",
+      "tests": 454,
+      "environments": [
+        "local SDK suite",
+        "isolated Linux SDK suite",
+        "same-tenant Feishu technical test table"
+      ],
+      "scope": [
+        "source_browser_and_candidate_cli_scan_proofs_checked_separately",
+        "inspection_and_preparation_only_scans_excluded_from_handoff",
+        "exact_owner_matches_one_bound_assistant_account_not_display_name",
+        "exact_owner_workflow_definition_independently_read_back_twice",
+        "single_assistant_owned_test_row_advanced_to_human_node",
+        "human_owned_and_unassigned_rows_remained_at_source",
+        "repeated_marker_did_not_advance_the_human_node"
+      ],
+      "not_validated": [
+        "production_project_handoff_or_deployment",
+        "all_formal_project_native_node_rules_and_free_allowance_over_time"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "The release candidate was verified in a private Linux test installation. Production cutover is separate."
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.2.1",
+  "release_version": "2.3.0",
   "skill_release_validation": {
-    "version": "2.2.1",
+    "version": "2.3.0",
     "date": "2026-11-19",
-    "tests": 454,
+    "tests": 464,
     "environments": [
       "local SDK suite",
       "isolated Linux SDK suite",
-      "same-tenant Feishu technical test table"
+      "same-tenant Feishu test copy"
     ],
     "scope": [
-      "source_browser_and_candidate_cli_scan_proofs_checked_separately",
-      "inspection_and_preparation_only_scans_excluded_from_handoff",
-      "exact_owner_matches_one_bound_assistant_account_not_display_name",
-      "exact_owner_workflow_definition_independently_read_back_twice",
-      "single_assistant_owned_test_row_advanced_to_human_node",
-      "human_owned_and_unassigned_rows_remained_at_source",
-      "repeated_marker_did_not_advance_the_human_node"
+      "six_disabled_rule_definitions_read_and_pinned_twice",
+      "new_request_value_matches_field_watch_and_old_value_is_rejected",
+      "record_project_equality_and_other_writer_checked_in_live_test",
+      "receiver_membership_checked_before_requesting_scope_confirmation",
+      "acceptance_click_and_business_revision_checked_separately_from_delivery"
     ],
     "not_validated": [
-      "production_project_handoff_or_deployment",
-      "all_formal_project_native_node_rules_and_free_allowance_over_time"
+      "production_project_deployment_and_scheduler_handoff",
+      "long_term_free_allowance"
     ],
     "target_linux_installed": false,
-    "installation_note": "The release candidate was verified in a private Linux test installation. Production cutover is separate."
+    "installation_note": "The dedicated assistant features were checked on a test copy. Switching an existing project requires its own verification."
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

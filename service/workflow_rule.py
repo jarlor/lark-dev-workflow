@@ -14,10 +14,28 @@ import native_stage_inspection
 import stage_contract
 import unattended_control as control
 import watch
+from gate_events import option_names
 from onboard import OnboardingError, link_target
 
 REGISTRY = 'ai-node-rules.json'
 ROLES = ('requirements', 'bugs', 'work')
+STAGE_REQUEST = 'assistant_stage_request'
+# These labels are the six commands shared by the project adapter and the registered rules.
+STAGE_REQUESTS = {
+    'req-start': ('requirements', '需求开始研发', '可研发', '研发中'),
+    'req-accept': ('requirements', '需求发起验收', '研发中', '待验收'),
+    'bug-start': ('bugs', 'Bug开始修复', '可研发', '研发中'),
+    'bug-accept': ('bugs', 'Bug发起验收', '研发中', '待验收'),
+    'work-start': ('work', '研发项开始执行', '可开始', '进行中'),
+    'work-deliver': ('work', '研发项交付', '进行中', '已交付'),
+}
+REQUEST_FIELDS = {
+    'req-start': ('work',), 'req-accept': ('work', 'acceptor', 'verification'),
+    'bug-start': ('work', 'baseline', 'reproduction_tests'), 'bug-accept': ('work', 'acceptor', 'retest_tests'),
+    'work-start': ('plan', 'scope', 'deliverable', 'verification_plan'), 'work-deliver': ('summary',),
+}
+LINK_ROLES = {'work': 'work', 'verification': 'verification', 'reproduction_tests': 'verification',
+              'retest_tests': 'verification'}
 CONTROLS = {'pasteUpdate', 'automationBatchUpdate', 'openAPIBatchUpdate'}
 TRIGGER_FIELDS = {'table_name', 'field_watch_info', 'record_watch_info', 'trigger_control_list'}
 
@@ -84,11 +102,33 @@ def checked_rule(rule):
         'required_field_ids',
         'owner_field_id',
     }
+    requested = rule.get('purpose') == STAGE_REQUEST
+    if requested:
+        keys.update({'purpose', 'key', 'marker_text', 'table_name', 'title', 'nature_field_id', 'nature_option',
+                     'processing_field_id', 'processing_option', 'authored_by', 'owner_match'})
+    optional = {'definition_sha256', 'project_filter_mode'} if requested else {'definition_sha256', 'owner_match'}
     need(
-        set(rule) - {'definition_sha256', 'owner_match'} == keys and rule['role'] in (*ROLES, 'diagnostic'),
+        set(rule) - optional == keys and rule['role'] in (*ROLES, 'diagnostic'),
         '登记的规则不完整。',
     )
-    if 'owner_match' in rule:
+    if requested:
+        need(
+            (rule['role'], rule['marker_text'], rule['source']['name'], rule['target']['name'])
+            == STAGE_REQUESTS.get(rule['key'])
+            and rule['guard']['kind'] == 'project_link'
+            and rule.get('project_filter_mode', 'trigger_project_id') == 'trigger_project_id'
+            and bridge.nonempty(rule['table_name']) and bridge.nonempty(rule['title'])
+            and re.fullmatch(r'ou_[A-Za-z0-9]+', rule['authored_by']),
+            '须登记这张表对应的助手请求、起点、终点和所属项目。',
+        )
+        work = rule['role'] == 'work'
+        need(
+            rule['owner_match'] == ('bound_assistant' if work else 'none')
+            and (rule['owner_field_id'] is not None) == work
+            and rule['nature_option']['name'] == '当前工作' and rule['processing_option']['name'] == '正常',
+            '须排除历史记录和异常事项，研发项还须归本助手负责。',
+        )
+    elif 'owner_match' in rule:
         need(
             rule['owner_match'] == 'bound_assistant' and rule['owner_field_id'] is not None,
             '精确核对助手时，须登记负责人的字段编号。',
@@ -98,7 +138,7 @@ def checked_rule(rule):
         and re.fullmatch(r'tbl[A-Za-z0-9]+', rule['table_id']),
         '需要新版工作流和表的真实编号。',
     )
-    for k in ('source', 'target'):
+    for k in (('source', 'target', 'nature_option', 'processing_option') if requested else ('source', 'target')):
         opt = rule[k]
         need(
             set(opt) == {'id', 'name'}
@@ -116,6 +156,8 @@ def checked_rule(rule):
     )
     need(isinstance(rule['required_field_ids'], list), '必填字段须按编号登记。')
     ids = [rule['stage_field_id'], rule['marker_field_id'], guard['field_id'], *rule['required_field_ids']]
+    if requested:
+        ids.extend([rule['nature_field_id'], rule['processing_field_id']])
     if rule['owner_field_id'] is not None:
         ids.append(rule['owner_field_id'])
     need(
@@ -147,26 +189,50 @@ def fingerprint(workflow):
     ).hexdigest()
 
 
-def assistant_condition(conditions, field_name, bot_open_id):
-    matches = [c for c in conditions if isinstance(c, dict) and c.get('field_name') == field_name]
-    need(len(matches) == 1, '须有一个条件指定本行的助手负责人。')
-    values = matches[0].get('value')
-    need(isinstance(values, list) and len(values) == 1, '负责人条件须精确指定一位助手。')
+def assistant_values(values, bot_open_id):
+    need(isinstance(values, list) and len(values) == 1, '条件须精确指定一位助手。')
     person = values[0].get('value') if isinstance(values[0], dict) else None
     need(
         isinstance(bot_open_id, str) and re.fullmatch(r'ou_[A-Za-z0-9]+', bot_open_id)
         and isinstance(person, dict) and person.get('id') == bot_open_id,
-        '负责人的 open_id 与绑定的助手不符。',
+        '条件中的账号与绑定的助手不符。',
     )
     expected_person = {'id': bot_open_id}
     if 'name' in person:
         need(bridge.nonempty(person['name']), '负责人显示名无效。')
         expected_person['name'] = person['name']
-    return condition(field_name, 'is', [dict(value_type='user', value=expected_person)])
+    return [dict(value_type='user', value=expected_person)]
+
+
+def assistant_condition(conditions, field_name, bot_open_id):
+    matches = [c for c in conditions if isinstance(c, dict) and c.get('field_name') == field_name]
+    need(len(matches) == 1, '须有一个条件指定本行的助手负责人。')
+    return condition(field_name, 'is', assistant_values(matches[0].get('value'), bot_open_id))
+
+
+def check_request_branch(steps, trigger, action, bot_open_id):
+    branch, delay = steps['IfElseBranch'], steps['Delay']
+    need(
+        trigger.get('next') == branch['id']
+        and all('next' not in step for step in (branch, action, delay))
+        and branch['children'] == {'links': [{'kind': 'if_true', 'to': action['id']},
+                                             {'kind': 'if_false', 'to': delay['id']}]}
+        and delay['data'] == {'duration': 1} and type(delay['data']['duration']) is int,
+        '助手提交的请求只能更新本行；其他人提交时仅等待一分钟后结束。',
+    )
+    outer = branch['data'].get('condition', {}).get('conditions')
+    need(isinstance(outer, list) and len(outer) == 1, '请求人判断只能使用一组条件。')
+    inner = outer[0].get('conditions')
+    need(isinstance(inner, list) and len(inner) == 1, '只允许判断触发行的本次修改人。')
+    expected = dict(left_value=dict(value_type='ref', value='$.' + trigger['id'] + '.recordModifiedUser'),
+                    operator='is', right_value=assistant_values(inner[0].get('right_value'), bot_open_id))
+    need(branch['data'] == {'condition': {'conjunction': 'or',
+         'conditions': [{'conjunction': 'and', 'conditions': [expected]}]}},
+         '触发行的本次修改人须为项目绑定的助手。')
 
 
 def check_graph(workflow, rule, table_name, names, *, bot_open_id=None):
-    """Reject additional branches, writes, dynamic field values, filters, and unknown execution settings."""
+    """Verify the entire registered graph, including the single permitted modifier branch."""
     checked_rule(rule)
     need(
         set(workflow)
@@ -176,30 +242,42 @@ def check_graph(workflow, rule, table_name, names, *, bot_open_id=None):
         '无法核实规则编号、启用状态或其他配置。',
     )
     steps = workflow['steps']
+    requested = rule.get('purpose') == STAGE_REQUEST
+    step_types = {'SetRecordTrigger', 'SetRecordAction'}
+    if requested:
+        step_types.update(('IfElseBranch', 'Delay'))
+        need(rule['authored_by'] == bot_open_id and rule['table_name'] == table_name
+             and rule['title'] == workflow.get('title'), '登记的助手、规则或表与现场不符。')
     need(
         isinstance(steps, list)
-        and len(steps) == 2
-        and {s['type'] for s in steps} == {'SetRecordTrigger', 'SetRecordAction'},
-        '规则必须只有一次触发和一个更新本行的动作。',
+        and len(steps) == len(step_types) and {s['type'] for s in steps} == step_types
+        and len({s['id'] for s in steps}) == len(steps),
+        '步骤缺失、重复，或含有登记以外的动作。',
     )
-    trigger, action = sorted(steps, key=lambda s: s['type'] != 'SetRecordTrigger')
+    by_type = {s['type']: s for s in steps}
+    trigger, action = by_type['SetRecordTrigger'], by_type['SetRecordAction']
     for step in steps:
         need(
             set(step) <= {'id', 'type', 'title', 'children', 'data', 'next'}
             and bridge.nonempty(step['id'])
-            and step.get('children') == {'links': []},
+            and (step['type'] == 'IfElseBranch' or step.get('children') == {'links': []}),
             '规则存在分支或未核实的设置。',
         )
-    need(
-        trigger['id'] != action['id'] and trigger.get('next') == action['id'] and 'next' not in action,
-        '触发后须直接更新本行，并在这里结束。',
-    )
+    if requested:
+        need(re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]{0,127}', trigger['id']),
+             '无法把修改人引用唯一对应到触发步骤。')
+        check_request_branch(by_type, trigger, action, bot_open_id)
+    else:
+        need(trigger.get('next') == action['id'] and 'next' not in action, '触发后须直接更新本行，并在这里结束。')
     td, ad = trigger['data'], action['data']
+    marker = names[rule['marker_field_id']]
+    watched = (condition(marker, 'is', [dict(value_type='text', value=rule['marker_text'])])
+               if requested else {'field_name': marker})
     need(
         set(td) == TRIGGER_FIELDS
         and td['table_name'] == table_name
-        and td['field_watch_info'] == [{'field_name': names[rule['marker_field_id']]}],
-        '只能监听指定表的一个触发字段。',
+        and td['field_watch_info'] == [watched],
+        '助手请求须在字段监听条件中精确匹配新填的文字。' if requested else '只能监听指定表的一个触发字段。',
     )
     controls = td['trigger_control_list']
     need(
@@ -214,6 +292,10 @@ def check_graph(workflow, rule, table_name, names, *, bot_open_id=None):
         condition(names[guard['field_id']], 'is', [dict(value_type='text', value=guard['value'])]),
         condition(stage, 'is', [dict(value_type='option', value=rule['source'])]),
     ]
+    if requested:
+        for key in ('nature', 'processing'):
+            expected.append(condition(names[rule[key + '_field_id']], 'is',
+                                      [dict(value_type='option', value=rule[key + '_option'])]))
     expected.extend(condition(names[fid], 'isNotEmpty', []) for fid in rule['required_field_ids'])
     filters = td['record_watch_info']
     need(
@@ -270,6 +352,57 @@ def source_step(rule, mapped):
         and {mapped[k]['id'] for k in step['required_fields']} <= set(rule['required_field_ids']),
         '遗漏或改变了原节点的负责人或必填要求。',
     )
+    if rule.get('purpose') == STAGE_REQUEST:
+        required = set(REQUEST_FIELDS[rule['key']]) | set(step['required_fields'])
+        need(
+            set(rule['required_field_ids']) == {mapped[k]['id'] for k in required}
+            and step['person_field'] == ('owner' if rule['role'] == 'work' else None),
+            '这一步的负责人或必填项与原项目对应步骤不符。',
+        )
+
+
+def check_request_fields(rule, binding, live, raw):
+    mapped = binding['tables'][rule['role']]['fields']
+    stage = rule['stage_field_id']
+    native_stage_inspection.inspect_field(mapped['status'], mapped, live[stage], raw[stage])
+    for source in (mapped['status'], live[stage], raw[stage].get('property') or {}):
+        options = source.get('options') or []
+        if any(isinstance(o, dict) and 'id' in o for o in options):
+            choices = option_names(options)
+            need(all(choices.get(rule[k]['id']) == rule[k]['name'] for k in ('source', 'target')),
+                 '本表的流程选项编号与登记不一致。')
+    marker = rule['marker_field_id']
+    need(
+        live[marker]['name'] == '助手请求'
+        and all(field['id'] != marker for key, field in mapped.items() if key != 'assistant_request')
+        and ('assistant_request' not in mapped or mapped['assistant_request']['id'] == marker),
+        '请使用本表单独的助手请求字段。',
+    )
+    for key in ('nature', 'processing'):
+        fid, option = rule[key + '_field_id'], rule[key + '_option']
+        need(
+            mapped[key]['id'] == fid and mapped[key]['type'] == live[fid].get('type') == 'select'
+            and live[fid].get('multiple') is False and raw[fid].get('type') == 3
+            and raw[fid].get('ui_type') == 'SingleSelect'
+            and option_names(live[fid]['options']).get(option['name']) == option['name']
+            and option_names(raw[fid]['property']['options']).get(option['id']) == option['name'],
+            '记录性质或处理情况没有使用本表正确的单选值。',
+        )
+    for key, field in mapped.items():
+        fid = field['id']
+        if fid not in rule['required_field_ids']:
+            continue
+        if key in LINK_ROLES:
+            target = binding['tables'][LINK_ROLES[key]]['id']
+            need(field.get('target_table_id') == target and field['type'] == live[fid]['type'] == 'link'
+                 and link_target(live[fid]) == target and raw[fid]['type'] in (18, 21)
+                 and raw[fid]['property']['table_id'] == target, '必填关联没有指向约定的表。')
+        elif key == 'acceptor':
+            need(field['type'] == live[fid]['type'] == 'user' and live[fid].get('multiple') is False
+                 and raw[fid]['type'] == 11, '验收人须使用已绑定的单人人员字段。')
+        else:
+            need(field['type'] == live[fid]['type'] == 'text' and raw[fid]['type'] == 1,
+                 '尚未核实这项必填证据的字段类型。')
 
 
 def live_workflow(reader, token, identifier):
@@ -327,10 +460,15 @@ def project_condition(reader, token, binding, rule, table_name, fields, raw, wor
     )
     steps = workflow['steps']
     triggers = [s for s in steps if s.get('type') == 'SetRecordTrigger']
+    requested = rule.get('purpose') == STAGE_REQUEST
+    if requested:
+        structure = len(steps) == 4 and {s['type'] for s in steps} == {
+            'SetRecordTrigger', 'SetRecordAction', 'IfElseBranch', 'Delay'}
+    else:
+        structure = len(steps) == 2 and all(
+            s['type'] in ('SetRecordTrigger', 'SetRecordAction', 'FindRecordAction') for s in steps)
     need(
-        len(steps) == 2
-        and len(triggers) == 1
-        and all(s['type'] in ('SetRecordTrigger', 'SetRecordAction', 'FindRecordAction') for s in steps)
+        structure and len(triggers) == 1
         and set(triggers[0]['data']) == TRIGGER_FIELDS
         and triggers[0]['data'].get('table_name') == table_name,
         '无法确定唯一的项目触发器。',
@@ -375,6 +513,7 @@ def verify(config_path, rule_name, *, reader_factory=watch.Cli):
         rule = private_registry(config, paths)[rule_name]
         ids = checked_rule(rule)
         scope_only = rule.get('purpose') == 'project_scope'
+        requested = rule.get('purpose') == STAGE_REQUEST
         runner = control.load_config(config['runner_config'])
         binding = bridge.load(paths[2])
         actor = control.actor_for_runner(runner, binding)
@@ -436,6 +575,8 @@ def verify(config_path, rule_name, *, reader_factory=watch.Cli):
             )
             if rule['guard']['kind'] == 'text':
                 need(by_id[rule['guard']['field_id']].get('type') == 'text', '登记的文字范围字段类型已变化。')
+            if requested:
+                check_request_fields(rule, binding, by_id, raw)
             owner = rule['owner_field_id']
             owner_match = rule.get('owner_match', 'nonempty_only' if owner else 'none')
             if owner:
@@ -471,11 +612,21 @@ def verify(config_path, rule_name, *, reader_factory=watch.Cli):
             project_scope_verified=scope_verified,
             scope_condition=rule['guard']['kind'],
         )
+        if requested:
+            project_fid = rule['guard']['field_id']
+            result.update(
+                project_condition_verified=scope_verified,
+                project_scope_verified=scope_verified and by_id[project_fid].get('multiple') is False
+                    and raw[project_fid]['property'].get('multiple') is False,
+                trigger_modifier_verified=True,
+                new_marker_value_verified=True,
+                business_evidence_checked=False,
+            )
         if scope_only:
             result.update(check='trigger_project_scope', action_checked=False)
             return result
         result.update(
-            check='ai_node_rule',
+            check=STAGE_REQUEST if requested else 'ai_node_rule',
             action_checked=True,
             definition_matches=True,
             updates_trigger_row_only=True,

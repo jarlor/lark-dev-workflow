@@ -18,7 +18,7 @@ import unattended
 from identity_handoff import sync_directory
 
 
-WAIT_FOR_RECEIVER = '计划已写好。助手正在准备接收这条研发项的确认，准备好后会发提醒。'
+WAIT_FOR_RECEIVER = '助手还没准备好接收这条事项的确认。请先用同一执行器扫描项目，再检查一次。'
 
 def fixed_view(project):
     table = project.tables['work']
@@ -81,7 +81,7 @@ def persist(path, value):
     sync_directory(path.parent)
 
 
-def require_capture_ready(project, table_id, record):
+def require_capture_ready(project, role, record):
     """Check the receiver's actual membership and epoch immediately before a new invitation."""
     now = int(time.time())
     scope = plan.bridge.load(Path(project.paths[1]) / gate_events.INDEX)
@@ -89,8 +89,10 @@ def require_capture_ready(project, table_id, record):
     plan.check(scope.get('signature') == gate_events.signature(project.binding, project.config['tenant_key'])
                and type(started) is int and type(observed) is int and 0 < started <= observed <= now
                and observed >= now - gate_events.MAX_AGE, WAIT_FOR_RECEIVER)
+    bound = project.tables[role]
+    table_id = bound['id']
     table = scope['tables'].get(table_id, {})
-    fields = project.tables['work']['fields']
+    fields = bound['fields']
     field_id = fields['status']['id']
     since = table.get('since', {}).get(record)
     plan.check(table_id in project.config['table_ids'] and record in table.get('records', [])
@@ -202,7 +204,7 @@ def notify(project, record, person, revision, *, expected_request=None):
             if not queued:
                 persist(request, requested)
             try:
-                require_capture_ready(project, table, record)
+                require_capture_ready(project, 'work', record)
             except (OSError, sqlite3.Error, KeyError, TypeError, json.JSONDecodeError) as exc:
                 raise plan.Conflict(WAIT_FOR_RECEIVER) from exc
             persist(intent_file, intent)
@@ -238,16 +240,58 @@ def run(path, record, confirmer, revision, *, expected_request=None):
     return {'status': 'pending', 'reason': reason, 'record_id': record, 'plan_revision': revision}
 
 
+def check_before_invite(path, role, record):
+    """Check a waiting row and its active receiver without posting a comment."""
+    result = {'status': 'pending', 'check': 'before_invitation', 'role': role, 'record_id': record}
+    try:
+        plan.check(role in plan.confirmation.GATES and re.fullmatch(r'rec[A-Za-z0-9]+', record),
+                   '请指定需求、Bug 或研发项的真实记录编号。')
+        project = plan.Project(path)
+        project.unchanged()
+        row = project.row(role, record)
+        before, after, person, revision, required = plan.confirmation.GATES[role]
+        people = plan.ids(row[person])
+        plan.check(plan.ids(row['project']) == [project.project] and row['nature'] == ['当前工作']
+                   and row.get('processing') in (None, [], ['正常']) and not plan.ids(row.get('merged_into')),
+                   '这条事项不属于本项目的当前工作，或已暂停、归并。')
+        plan.check(row['status'] != [after], f'这条事项已在「{after}」。请核对已有的点击，跳过这次提醒。')
+        plan.check(row['status'] == [before] and len(people) == 1 and people[0] != project.open_id
+                   and type(row[revision]) is int and row[revision] > 0
+                   and all(plan.confirmation.inline_text(row[key]) for key in required),
+                   '请核对当前节点、确认人和这版需要确认的内容。')
+        plan.confirmation.confirm_directory_user(project.reader, people[0])
+        require_capture_ready(project, role, record)
+        plan.check(project.row(role, record) == row, '检查期间事项有变化，请重新核对。')
+        project.unchanged()
+        result.update(status='ready_to_invite', confirmer=people[0], revision=row[revision])
+    except (plan.Conflict, plan.confirmation.Pending) as exc:
+        result['reason'] = str(exc)
+    except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, subprocess.SubprocessError,
+            sqlite3.Error, plan.OnboardingError, plan.control.ControlError, unattended.RunnerError):
+        result['reason'] = '未能核实这条事项和接收服务。请保留原记录，稍后重查。'
+    return result
+
+
 def main():
-    parser = argparse.ArgumentParser(description='在已准备好的研发项里提醒计划确认人。')
+    parser = argparse.ArgumentParser(description='检查能否收到人工确认，或提醒研发项的计划确认人。')
     parser.add_argument('--config', required=True, type=Path)
-    parser.add_argument('--work', required=True)
-    parser.add_argument('--confirmer', required=True)
-    parser.add_argument('--revision', required=True, type=int)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--work', help='发送已准备好的计划提醒')
+    mode.add_argument('--check-before-invite', choices=plan.confirmation.GATES, help='只检查接收状态')
+    parser.add_argument('--record-id', help='要核对的事项记录编号')
+    parser.add_argument('--confirmer')
+    parser.add_argument('--revision', type=int)
     args = parser.parse_args()
-    result = run(args.config, args.work, args.confirmer, args.revision)
+    if args.check_before_invite:
+        if not args.record_id or args.confirmer is not None or args.revision is not None:
+            parser.error('检查接收状态时，请用 --record-id 指定待确认的事项。')
+        result = check_before_invite(args.config, args.check_before_invite, args.record_id)
+    else:
+        if not args.confirmer or args.revision is None or args.record_id is not None:
+            parser.error('发送计划提醒时，需要 --work、--confirmer 和 --revision。')
+        result = run(args.config, args.work, args.confirmer, args.revision)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result['status'] == 'notified' else 1
+    return 0 if result['status'] in ('notified', 'ready_to_invite') else 1
 
 
 if __name__ == '__main__':

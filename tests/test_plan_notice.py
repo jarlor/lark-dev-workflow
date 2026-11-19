@@ -24,12 +24,15 @@ class PlanNoticeTests(unittest.TestCase):
         self.project.tables = {'work': {'id': 'tblWork', 'views': [self.view],
                                         'fields': {'plan': {'name': '研发计划'}, 'status': {'id': 'fldStage'},
                                                    'project': {'id': 'fldProject'}}}}
+        for role, table in [('requirements', 'tblReq'), ('bugs', 'tblBug')]:
+            self.project.tables[role] = {'id': table, 'fields': {
+                'status': {'id': table + 'Stage'}, 'project': {'id': table + 'Project'}}}
         self.now = 1700000000
         clock = mock.patch.object(notice.time, 'time', return_value=self.now)
         clock.start()
         self.addCleanup(clock.stop)
         p = self.project
-        p.config.update(tenant_key='org', state_dir=temp.name, table_ids=['tblWork'], base_token=p.token,
+        p.config.update(tenant_key='org', state_dir=temp.name, table_ids=['tblWork','tblReq','tblBug'], base_token=p.token,
                         project_record_id=p.project, bot_open_id=p.open_id, lark_profile='dedicated',
                         runner_config=str(p.directory / 'runner.json'))
         p.binding = dict(base={'token': p.token}, tables=p.tables, scope={'project_record_id': p.project},
@@ -140,6 +143,28 @@ class PlanNoticeTests(unittest.TestCase):
         fcntl.flock(self.receiver, fcntl.LOCK_UN)
         self.assertEqual(self.invoke(), result)
         self.assertEqual(self.sends, 1)
+
+    def test_scope_invite_waits_for_exact_table_and_row_then_returns_recipient_without_sending(self):
+        row = dict(project=[{'id': 'recProject'}], status=['待确认'], nature=['当前工作'],
+                   confirmer=[{'id': 'ou_person'}], revision=1, scope='只显示待处理反馈', criteria='已处理的反馈不出现')
+        self.project.row.side_effect = None
+        self.project.row.return_value = row
+        for role in ('requirements', 'bugs'):
+            with self.subTest(role=role):
+                record = 'recNew'
+                table = self.project.tables[role]['id']
+                self.scope_file.write_text(json.dumps(self.index))
+                check = lambda: notice.check_before_invite(self.project.path, role, record)
+                self.assertEqual(check()['status'], 'pending')
+                scope = copy.deepcopy(self.index)
+                scope['tables'][table] = dict(records=[record], project_field=table+'Project',
+                    fields={table+'Stage':'status'}, native_stage_field_id=table+'Stage', since={record:self.now-4})
+                self.scope_file.write_text(json.dumps(scope))
+                self.assertEqual(check(), dict(status='ready_to_invite', check='before_invitation',
+                                                role=role, record_id=record, confirmer='ou_person', revision=1))
+                with mock.patch.dict(row, status=['可研发']):
+                    self.assertEqual(check()['status'], 'pending')
+        self.assertEqual((self.previews, self.sends), (0, 0))
 
     def test_wrong_or_stale_scope_and_same_second_never_send(self):
         for mutate in (lambda s: s.update(signature='other'),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check one current scope or plan against the assistant's receipts and Feishu history."""
+"""Check a scope, plan or final acceptance click against the assistant's receipts and Feishu history."""
 import argparse
 import contextlib
 import json
@@ -175,14 +175,22 @@ def match_history(event, items, field_id, person_name, informational, transition
     require(matches == 1, '没有找到唯一一笔与事件的时间、表版本和节点变化都一致的操作。')
 
 
-def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_reader=None):
+def verify(config_path, role, record_id, *, acceptance_revision=None, reader_factory=watch.Cli, receipt_reader=None):
     # A trusted host may retain the original Feishu event separately from the compact journal.
     # Both reads must use the same source. All live field, history and actor checks still apply.
     read_receipt = receipt if receipt_reader is None else receipt_reader
     result = {'status': 'pending', 'role': role, 'record_id': record_id,
               'check': 'current_record_human_transition', 'content_scope': 'record_fields', 'dispatch_checked': False}
+    acceptance = acceptance_revision is not None
+    if acceptance:
+        result.update(check='acceptance_node_click', content_scope='click_and_record_revision',
+                      delivery_evidence_checked=False, independent_retest_checked=False,
+                      release_checked=False, feedback_closure_checked=False)
     try:
         require(re.fullmatch(r'rec[a-zA-Z0-9]+', record_id) and role in GATES, '请指定有效的事项和记录编号。')
+        if acceptance:
+            require(role in ('requirements', 'bugs') and type(acceptance_revision) is int
+                    and 0 < acceptance_revision < 2**53, '验收点击须指定需求或 Bug 及本次验收的业务修订号。')
         config = bridge.config_from(config_path)
         paths = bridge.runner_pins(config)
         runner = control.load_config(config['runner_config'])
@@ -193,7 +201,10 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_re
         table = tables[role]
         table_id, fields = table['id'], table['fields']
         require(table_id in config['table_ids'], '接收器没有绑定这张表。')
-        before, after, person, revision, required = GATES[role]
+        if acceptance:
+            before, after, person, revision, required = '待验收', '已验收', 'acceptor', 'revision', ()
+        else:
+            before, after, person, revision, required = GATES[role]
         status, token = fields['status'], binding['base']['token']
         require(status['type'] == 'stage', '此核对只支持原生流程字段。')
         event = read_receipt(config, binding, paths, table_id, record_id, status['id'], before, after)
@@ -212,11 +223,17 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_re
         reader = reader_factory(actor['profile'], runner=run_cli, executable=runner['lark_bin'], actor=actor)
         watch._fields(reader, binding, role, table, inspected={})
         steps = status['stage_contract']['steps']
-        require(len(steps) >= 2 and (steps[0]['name'], steps[1]['name']) == (before, after)
-                and steps[0]['actor'] == 'human' and steps[1]['actor'] == 'ai'
-                and steps[0]['person_field'] == person and fields[revision]['type'] == 'number',
+        if acceptance:
+            step = steps[-1]
+            require(step['name'] == before and status['stage_contract']['done'] == after,
+                    '绑定的原流程没有从待验收到已验收的最后一步。')
+        else:
+            step = steps[0]
+            require(len(steps) >= 2 and (step['name'], steps[1]['name']) == (before, after)
+                    and steps[1]['actor'] == 'ai', '原流程的确认步骤不匹配。')
+        require(step['actor'] == 'human' and step['person_field'] == person and fields[revision]['type'] == 'number',
                 '原流程约定没有绑定这一步的确认人和业务修订。')
-        needed = set(required) | set(steps[0]['required_fields'])
+        needed = set(required) | set(step['required_fields'])
         require(all(fields[key]['type'] == 'text' for key in required), '范围或计划字段的类型与约定不符。')
         def current():
             row = reader.read_record(token, table_id, record_id, list(fields.values()))
@@ -232,11 +249,15 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_re
                 and isinstance(people[0].get('name'), str) and people[0]['name'].strip(),
                 '没有唯一一位与实际操作人一致的指定确认人。')
         confirm_directory_user(reader, event['operator_open_id'])
-        require(type(live[revision]) is int and 0 < live[revision] < 2**53
-                and all(inline_text(live[k]) for k in needed),
-                '这版的修订号、范围、计划或必填说明不全。')
-        informational = {fields[k]['id'] for k in ('human_action', 'next_step', 'processing', 'summary')
-                         if k in fields and k not in needed}
+        if acceptance:
+            require(type(live[revision]) is int and live[revision] == acceptance_revision,
+                    '当前事项的修订号与想核对的验收版本不同。')
+        else:
+            require(type(live[revision]) is int and 0 < live[revision] < 2**53
+                    and all(inline_text(live[k]) for k in needed),
+                    '这版的修订号、范围、计划或必填说明不全。')
+        display_only = ('human_action', 'next_step') if acceptance else ('human_action', 'next_step', 'processing', 'summary')
+        informational = {fields[k]['id'] for k in display_only if k in fields and k not in needed}
         entries = history(reader, token, table_id, record_id)
         match_history(event, entries, status['id'], people[0]['name'], informational, (before, after))
         require(live == current(), '核对期间这条记录又变了。')
@@ -247,7 +268,7 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_re
                 and bridge.load(paths[2]) == binding and control.load_config(config['runner_config']) == runner
                 and read_receipt(config, binding, paths, table_id, record_id, status['id'], before, after) == event,
                 '核对期间记录历史或接收器绑定有变化。')
-        result.update(status='verified', table_id=table_id, field_id=status['id'],
+        result.update(status='click_verified' if acceptance else 'verified', table_id=table_id, field_id=status['id'],
                       project_record_id=scope['project_record_id'], business_revision=live[revision], event_id=event['event_id'],
                       operator_open_id=event['operator_open_id'], table_revision=event['event_revision'],
                       update_time=event['update_time'])
@@ -259,14 +280,16 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_re
 
 
 def main():
-    parser = argparse.ArgumentParser(description='只读核对一条事项的范围或计划确认。')
+    parser = argparse.ArgumentParser(description='只读核对一条事项的范围确认、计划确认或最终验收点击。')
     parser.add_argument('--config', required=True, type=Path, help='已配对的长连接服务配置')
     parser.add_argument('--role', required=True, choices=GATES)
     parser.add_argument('--record-id', required=True)
+    parser.add_argument('--acceptance-click', type=int, metavar='REVISION',
+                        help='只核对需求或 Bug 这一修订是否由指定验收人点击「已验收」')
     args = parser.parse_args()
-    result = verify(args.config, args.role, args.record_id)
+    result = verify(args.config, args.role, args.record_id, acceptance_revision=args.acceptance_click)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result['status'] == 'verified' else 1
+    return 0 if result['status'] in ('verified', 'click_verified') else 1
 
 
 if __name__ == '__main__':

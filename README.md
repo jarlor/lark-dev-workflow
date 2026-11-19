@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v2.2.1 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.1)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v2.3.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.3.0)**
 
-本包 Skill 为 **v2.2.1**，新版模板规范为 **2.0.0**。线上模板的实际版本以页面和 Release 中的部署结果为准；`template/release.json` 保留打包时的核对信息，不能仅凭下载包版本认定线上已升级。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+本包 Skill 为 **v2.3.0**，新版模板规范为 **2.0.0**。线上模板的实际版本以页面和 Release 中的部署结果为准；`template/release.json` 保留打包时的核对信息，不能仅凭下载包版本认定线上已升级。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -14,6 +14,12 @@
 | 项目配置 | 目标项目的 `.lark-dev-workflow/project.json` | 绑定共享 Base 中本项目的真实记录、字段、文档章节和维护约定 |
 
 模板提供结构和入口，Skill 负责业务判断。具体边界见 [模板与 Skill 职责](模板与Skill职责.md)。
+
+## v2.3.0 核对助手请求和人工确认
+
+发出新需求或 Bug 的确认邀请前，Linux 助手可以先核对自己是否已在监听这条事项。确认监听已就绪后，再请对方点「完成节点」，减少漏收快速点击的情况。项目需要确认验收人点了哪一版时，可以单独核对这次点击。
+
+服务器可以检查需求、Bug 和研发项上的六条自动规则。请求必须由本项目的助手发出，且刚填入的文字要与动作相符。把旧文字清掉时，规则应留在原处。项目管理员可按[服务说明](service/README.md)在自己的副本演练，再决定何时切换。
 
 ## v2.2.1 按研发项的负责人处理
 
@@ -103,7 +109,7 @@ Linux 的配置、试跑、安装、暂停及移除方法见 [定时运行说明
 
 ### Linux 飞书长连接
 
-从 v2.2.1 Release 下载完整 ZIP 和 `SHA256SUMS`，在运行 Codex CLI 的 Linux 服务器上核对校验值，解压时保留同级的 `service/` 和 `skill/`。用项目所属组织的专用助手接入测试副本。原来使用本人账号或定时任务的项目可继续沿用原配置。安装命令 `npx skills add` 只安装 Skill。详见[服务安装与切换说明](service/README.md)。
+从 v2.3.0 Release 下载完整 ZIP 和 `SHA256SUMS`，在运行 Codex CLI 的 Linux 服务器上核对校验值，解压时保留同级的 `service/` 和 `skill/`。用项目所属组织的专用助手接入测试副本。原来使用本人账号或定时任务的项目可继续沿用原配置。安装命令 `npx skills add` 只安装 Skill。详见[服务安装与切换说明](service/README.md)。
 
 ### 安装 Skill
 
@@ -118,7 +124,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v2.2.1/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v2.3.0/skill/lark-dev-workflow --agent codex -g
 ```
 
 Linux 已安装时，可重新执行上面的固定版本安装命令更新本 Skill。先保留项目配置和运行状态；手动安装或本地改过 Skill 的机器，先核对安装位置与差异，不覆盖个人修改。不要为了更新本技能运行会更新所有技能的命令。
@@ -132,7 +138,7 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 - 网页途径需要 Node.js 22+，复用本机已有、本人已登录的浏览器；配置步骤见 [网页接入说明](skill/lark-dev-workflow/references/browser-access.md)。不要求安装 Lark CLI，不因缺 profile 创建应用或 bot。
 - 已有可用 CLI 用户 profile 的机器可继续使用官方 [Lark CLI](https://github.com/larksuite/cli)，并提供相应的 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared` 技能；保持本人 user 身份。既有 CLI 验证使用 Lark CLI 1.0.94、Python 3.9.6，不代表新增网页途径已通过真实验证。
 
-`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v2.2.1 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v2.2.1/lark-dev-workflow-v2.2.1.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v2.3.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v2.3.0/lark-dev-workflow-v2.3.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 
