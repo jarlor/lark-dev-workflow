@@ -213,6 +213,8 @@ python3 service/plan_action.py --config "$bridge_config" --requirement "$require
 ## 替代已有 cron 与回退
 
 1. 测试已通过且完成正式发版后，为正式副本另配相应 ID；模板母版不在范围内。核对旧执行器工作区、绑定、暂停状态、未完成事项、当前会话和实际 cron 所有者。用候选配置执行一次只读 scan，与原身份的可见记录和线程比较。历史确认、失败测试、旧 @ 评论仍须接续。
+   如果原本人网页执行器最后一次报“网页记录尚未加载完整”，用 `python3 service/reconcile_scan_error.py --source /原路径/runner.json` 重新读取同一个表。看到 `preview` 后，用相同命令加 `--apply 核对编号` 保存复查结果。工具核对原会话的完成回执，并保留原错误、检查点和刚出现的待办。原账号仍读不全时，先恢复它的读取能力。
+
 2. 备份原配置及 crontab，保留该项目原始 cron 行（包含 PATH、包装脚本和标记）。按 [身份交接工具](identity_handoff.py) 的 `--help` 先预检，再在原工作区锁下交接。工具会先保存本次核对摘要，再依次暂停两个执行器和保存交接状态。中途断开时，用原来的两份配置和同一份摘要重跑 `--apply`。如果有人已手动暂停或恢复、原记录发生变化，先核实当前情况。保留状态目录里的交接文件。收到“正在运行”、可见范围缩小或不确定写入时停止切换；不要杀 worker 或手改状态文件。旧调度和候选都暂停后，按原 config 的精确标记移除那一条旧 cron；重新读取确认其他任务仍在。
 3. `/etc/lark-dev-workflow/demo/previous-runners.json` 列出原 config 的绝对路径，例如 `["/srv/demo/old-runner.json"]`。全新测试执行器用 `[]`。systemd 在 dispatch 前检查本用户 crontab 上旧/新配置的路径或标记；还须人工核对自定义 wrapper、其他用户、systemd timer 没有第二个入口。
 4. 只恢复候选执行器的交接暂停，启用单一服务并读回状态。确认一次人放行只产生一次执行；没有新通知时服务仍能补查或继续已获准工作。升级时先有序停止服务，等在途 tick 结束，再更换完整固定版本。

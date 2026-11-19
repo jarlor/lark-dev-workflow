@@ -272,6 +272,9 @@ def run_collector(argv, *, input, capture_output, text, timeout):
     return subprocess.CompletedProcess(argv, child.returncode, stdout, stderr)
 
 
+RECORDS_INCOMPLETE = '网页记录尚未加载完整，已停止本轮。'
+
+
 def collect(config, access, *, comments_state_path, runner=run_collector):
     if config.get('documents'):
         fail('本人网页读取首版支持 Base；当前绑定含 Docx，不能跳过后继续。')
@@ -299,7 +302,7 @@ def collect(config, access, *, comments_state_path, runner=run_collector):
                     'ACCOUNT_MISMATCH': '飞书当前账号已改变，已停止读取。',
                     'PERMISSION_DENIED': '飞书页面拒绝访问，已停止读取。',
                     'COMMENTS_INCOMPLETE': '尚不能确认网页评论读全，已停止本轮。',
-                    'RECORDS_INCOMPLETE': '网页记录尚未加载完整，已停止本轮。',
+                    'RECORDS_INCOMPLETE': RECORDS_INCOMPLETE,
                     'SNAPSHOT_CHANGED': '读取期间表格或评论有变化，本轮未提交，稍后重试。',
                     'PAGE_INTERFACE_CHANGED': '飞书网页的数据格式与已验证版本不同，本轮已停止。',
                     'NODE_VERSION': '本人网页读取需要 Node.js 22 或更新版本。',

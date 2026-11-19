@@ -1,6 +1,7 @@
 /** Fixed page-side readers. Never evaluate expressions obtained from Base content. */
 export async function readTable(input) {
-  const end = Date.now() + 20000;
+  // The document may finish navigating before Feishu initializes the selected table.
+  const end = Date.now() + 45000;
   const pause = () => new Promise((resolve) => setTimeout(resolve, 200));
   const encode = (value) => JSON.stringify(value, (_key, item) =>
     item && typeof item === 'object' && !Array.isArray(item)

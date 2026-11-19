@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.4.0",
+    "skill_version": "2.4.1",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -47,7 +47,8 @@
         "comment_scope": "native_sdk_visible_model",
         "consistency": "two_complete_passes_equal",
         "scan_timeout_seconds": 300,
-        "supports_stage_fields": true
+        "supports_stage_fields": true,
+        "handoff_read_reconciliation": "Original personal-browser runner and original project required. Only a confirmed failure to load all records before starting Codex can be reconciled."
       },
       "optional_session_max_runs_default": 4,
       "stage_workflow_requires_explicit_migration": true,
@@ -98,7 +99,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 505,
+  "automated_tests_passed": 514,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -110,7 +111,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.0",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.1",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -446,35 +447,58 @@
       ],
       "target_linux_installed": false,
       "installation_note": "The dedicated assistant features were checked on a test copy. Switching an existing project requires its own verification."
+    },
+    "2.4.0": {
+      "date": "2026-11-20",
+      "tests": 505,
+      "environments": [
+        "Linux with the Feishu SDK (505 passed)",
+        "macOS (505 passed with the Feishu SDK; 502 passed and 3 SDK-dependent checks skipped without it)",
+        "same-organization Feishu test copy"
+      ],
+      "scope": [
+        "six_test_copy_transitions_observed_in_real_record_history",
+        "test_copy_request_replay_and_source_actor_checked",
+        "original_human_click_and_delivery_evidence_verified_separately",
+        "same_server_codex_read_only_replay_waited_for_human_acceptance",
+        "assigned_scope_and_build_bound_evidence_checked",
+        "manager_file_subscription_status_read_back",
+        "retry_after_uncertain_reply_requires_original_receipt_for_the_registered_marker"
+      ],
+      "not_validated": [
+        "full_production_scheduler_handoff",
+        "long_term_free_allowance",
+        "production_websocket_delivery_from_a_file_manager_subscription"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "Release verification and project activation are separate. Each project supplies its own test and deployment evidence."
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.4.0",
+  "release_version": "2.4.1",
   "skill_release_validation": {
-    "version": "2.4.0",
+    "version": "2.4.1",
     "date": "2026-11-20",
-    "tests": 505,
+    "tests": 514,
     "environments": [
-      "Linux with the Feishu SDK (505 passed)",
-      "macOS (502 passed, 3 Linux-only checks skipped)",
-      "same-organization Feishu test copy"
+      "Linux, Python 3.10, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)",
+      "macOS, Python 3.9, Node.js 22 and lark-oapi 1.8.0 (514 passed, 0 skipped)"
     ],
     "scope": [
-      "six_test_copy_transitions_observed_in_real_record_history",
-      "test_copy_request_replay_and_source_actor_checked",
-      "original_human_click_and_delivery_evidence_verified_separately",
-      "same_server_codex_read_only_replay_waited_for_human_acceptance",
-      "assigned_scope_and_build_bound_evidence_checked",
-      "manager_file_subscription_status_read_back",
-      "retry_after_uncertain_reply_requires_original_receipt_for_the_registered_marker"
+      "Original runner failure checked against its scheduler receipt, complete Codex turn, closed operations and matching checkpoint.",
+      "Simulated browser reads verified that new feedback remains pending and a failed or incomplete recheck cannot clear the error.",
+      "Review and atomic error archival were tested with the original workspace lock, configuration path, interrupted writes and retries.",
+      "Template structure 2.0.0 remains compatible. Existing projects keep their original binding.",
+      "A slow-loading table can finish opening within 45 seconds. The five-minute whole-scan limit and both complete passes are still required.",
+      "A live existing personal-browser project completed a full two-pass read-only preview; its execution state, checkpoint and comment index stayed byte-identical."
     ],
     "not_validated": [
-      "full_production_scheduler_handoff",
-      "long_term_free_allowance",
-      "production_websocket_delivery_from_a_file_manager_subscription"
+      "production_application_of_reconciliation",
+      "production_websocket_event_delivery",
+      "production_scheduler_cutover"
     ],
     "target_linux_installed": false,
-    "installation_note": "Release verification and project activation are separate. Each project supplies its own test and deployment evidence."
+    "installation_note": "The candidate was tested in an isolated Linux directory. No configuration or production scheduler was changed by these release checks."
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

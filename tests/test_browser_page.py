@@ -48,7 +48,10 @@ const table = {
 };
 global.window = {
   bitableStore: {getCurrentUserId: () => change === 'user' ? 'another-user' : 'fixture-user',
-    modelOperator:{getTableById: () => table}},
+    modelOperator:{getTableById: () => {
+      if (change === 'slow-table' && tick < 27500) return undefined;
+      return table;
+    }}},
   commentSDK: {serviceToken:change === 'base' ? 'another-base' : 'FixtureBase',
     getInitReplyListMode: () => 'incremental',
     request:{fetchInitData: async () => ({code:0,httpStatus:200,data:{}})}}
@@ -62,6 +65,11 @@ process.stdout.write(JSON.stringify(result));
                                 capture_output=True, text=True, timeout=10)
         self.assertEqual(result.returncode, 0, result.stderr)
         return json.loads(result.stdout)
+
+    def test_bound_table_can_finish_initializing_after_twenty_seconds(self):
+        result = self.run_page('slow-table')
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['data']['rows'][0]['record_id'], 'rec1')
 
     def test_explicit_null_remains_empty_but_missing_cell_is_not_invented(self):
         result = self.run_page('null')
