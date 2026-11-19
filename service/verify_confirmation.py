@@ -175,7 +175,10 @@ def match_history(event, items, field_id, person_name, informational, transition
     require(matches == 1, '没有找到唯一一笔与事件的时间、表版本和节点变化都一致的操作。')
 
 
-def verify(config_path, role, record_id, *, reader_factory=watch.Cli):
+def verify(config_path, role, record_id, *, reader_factory=watch.Cli, receipt_reader=None):
+    # A trusted host may retain the original Feishu event separately from the compact journal.
+    # Both reads must use the same source. All live field, history and actor checks still apply.
+    read_receipt = receipt if receipt_reader is None else receipt_reader
     result = {'status': 'pending', 'role': role, 'record_id': record_id,
               'check': 'current_record_human_transition', 'content_scope': 'record_fields', 'dispatch_checked': False}
     try:
@@ -193,7 +196,16 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli):
         before, after, person, revision, required = GATES[role]
         status, token = fields['status'], binding['base']['token']
         require(status['type'] == 'stage', '此核对只支持原生流程字段。')
-        event = receipt(config, binding, paths, table_id, record_id, status['id'], before, after)
+        event = read_receipt(config, binding, paths, table_id, record_id, status['id'], before, after)
+        require((event.get('table_id'), event.get('record_id'), event.get('field_id')) ==
+                (table_id, record_id, status['id']) and event.get('operator_open_id') != config['bot_open_id']
+                and isinstance(event.get('event_id'), str) and re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', event['event_id']),
+                '原始通知与这张表、这条事项或操作人不一致。')
+        if event.get('value_format') == gate_events.NATIVE_STAGE_IDS:
+            require(gate_events.opaque_pair(event['before'], event['after']), '原始通知没有两个不同的流程节点。')
+        else:
+            require('value_format' not in event and (event['before'], event['after']) == (before, after),
+                    '原始通知中的状态变化与这次确认不一致。')
         def run_cli(argv, **kwargs):
             kwargs['env'] = dict(kwargs.get('env', os.environ), PATH=runner['path'])
             return subprocess.run(argv, **kwargs)
@@ -233,7 +245,7 @@ def verify(config_path, role, record_id, *, reader_factory=watch.Cli):
                                 '--record-id', record_id, '--page-size', '1')
         require(head.get('items') == entries[:1] and bridge.config_from(config_path) == config
                 and bridge.load(paths[2]) == binding and control.load_config(config['runner_config']) == runner
-                and receipt(config, binding, paths, table_id, record_id, status['id'], before, after) == event,
+                and read_receipt(config, binding, paths, table_id, record_id, status['id'], before, after) == event,
                 '核对期间记录历史或接收器绑定有变化。')
         result.update(status='verified', table_id=table_id, field_id=status['id'],
                       project_record_id=scope['project_record_id'], business_revision=live[revision], event_id=event['event_id'],

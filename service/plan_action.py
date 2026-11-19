@@ -9,7 +9,7 @@ import plan_notice
 import prepare_plan
 
 
-def run(config, requirement, revision, confirmer, *, draft=None, reconcile=False):
+def run(config, requirement, revision, confirmer, *, draft=None, reconcile=False, confirm=None):
     if reconcile:
         plan = prepare_plan.get_prepared(config, requirement)
         if plan['status'] == 'prepared' and (
@@ -18,7 +18,7 @@ def run(config, requirement, revision, confirmer, *, draft=None, reconcile=False
             return {'status': 'conflict', 'reason': '查回的计划不属于这版需求或指定确认人。',
                     'record_id': plan['record_id'], 'plan_revision': plan['plan_revision']}
     else:
-        plan = prepare_plan.prepare(config, requirement, revision, confirmer, draft)
+        plan = prepare_plan.prepare(config, requirement, revision, confirmer, draft, confirm=confirm)
     if plan['status'] != 'prepared':
         return {'status': 'waiting' if plan['status'] == 'pending' else 'conflict', 'reason': plan['reason'],
                 'record_id': plan.get('record_id'), 'plan_revision': plan.get('plan_revision')}
@@ -33,7 +33,7 @@ def run(config, requirement, revision, confirmer, *, draft=None, reconcile=False
             'plan_revision': plan_revision, 'reason': notice['reason']}
 
 
-def main():
+def main(*, confirm=None):
     parser = argparse.ArgumentParser(description='为已确认的需求准备研发计划，并在研发项下提醒计划确认人。')
     parser.add_argument('--config', type=Path, required=True)
     parser.add_argument('--requirement', required=True)
@@ -52,7 +52,8 @@ def main():
             print(json.dumps({'status': 'conflict', 'reason': '请通过标准输入提供四项计划说明的 JSON。'},
                              ensure_ascii=False))
             return 1
-    result = run(args.config, args.requirement, args.revision, args.confirmer, draft=draft, reconcile=args.reconcile)
+    result = run(args.config, args.requirement, args.revision, args.confirmer, draft=draft,
+                 reconcile=args.reconcile, confirm=confirm)
     print(json.dumps(result, ensure_ascii=False))
     return int(result['status'] == 'conflict')
 

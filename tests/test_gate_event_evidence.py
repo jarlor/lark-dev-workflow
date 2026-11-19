@@ -137,6 +137,43 @@ class GateEventTests(RuntimeFixture):
         self.receive('afterScan')
         self.assertEqual([r['event_id'] for r in self.publish()['rows']], ['unaffected','afterScan'])
 
+    def test_full_record_images_repeating_current_project_keep_the_status_change(self):
+        self.scan()
+        compact = json.dumps(['recProject'])
+        rich = json.dumps([{'table_id':'tblProjects', 'record_ids':['recProject'], 'text':'项目', 'type':'text'}])
+        for i, link in enumerate(('recProject', compact, rich)):
+            event = self.event(f'full{i}')
+            action = event['event']['action_list'][0]
+            for side in ('before_value','after_value'):
+                action[side].append(dict(field_id='fldProject', field_value=link))
+                action[side].append(dict(field_id='fldRev', field_value='1'))
+            self.assertTrue(bridge.receive(event, self.service, self.journal))
+            self.assertFalse(bridge.receive(event, self.service, self.journal))
+        self.assertEqual([(row['event_id'],row['field_id']) for row in self.publish()['rows']],
+                         [(f'full{i}','fldStatus') for i in range(3)])
+
+    def test_full_images_with_unverified_or_changed_membership_invalidate_each_record(self):
+        current = json.dumps(['recProject'])
+        foreign = json.dumps(['recElsewhere'])
+        wrong_table = json.dumps([{'table_id':'tblWrong','record_ids':['recProject']}])
+        multiple = json.dumps(['recProject','recOther'])
+        bad = (([current],[]), ([],[current]), ([current],[foreign]), ([foreign],[foreign]),
+               ([current,current],[current]), ([current],[current,current]), ([''],['']),
+               ([wrong_table],[wrong_table]), ([multiple],[multiple]), (['unknown'],['unknown']))
+        for i in range(len(bad)):
+            self.snapshot['records'][f'tblWork/recCase{i}'] = self.row
+        self.scan()
+        for i,(before,after) in enumerate(bad):
+            record = f'recCase{i}'
+            self.receive(f'previous{i}', record=record)
+            event = self.event(f'move{i}', record=record)
+            action = event['event']['action_list'][0]
+            for side,values in [('before_value',before),('after_value',after)]:
+                action[side].extend(dict(field_id='fldProject',field_value=v) for v in values)
+            self.assertTrue(bridge.receive(event, self.service, self.journal))
+            self.receive(f'after{i}', record=record)
+        self.assertEqual(self.publish()['rows'],[])
+
     def test_delayed_event_for_member_across_scans_and_new_member_same_second(self):
         self.scan()
         self.snapshot['records']['tblWork/recSecond'] = self.row

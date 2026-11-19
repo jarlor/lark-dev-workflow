@@ -28,7 +28,7 @@ class PlanActionTests(unittest.TestCase):
     def test_uses_real_plan_id_and_revision_and_verified_notification(self):
         result = plan_action.run(*self.args, draft=self.draft)
         self.assertEqual((result['status'], result['notice'], result['comment_id']), ('prepared','notified','c'))
-        self.create.assert_called_once_with(*self.args, self.draft)
+        self.create.assert_called_once_with(*self.args, self.draft, confirm=None)
         self.get.assert_not_called()
         self.notify.assert_called_once_with(self.config, 'recNew', 'ou_manager', 1)
 

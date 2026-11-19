@@ -303,7 +303,7 @@ def get_prepared(config_path, requirement_id, *, project=None):
         return result('pending', '这份计划暂时无法核实。')
 
 
-def prepare(path, requirement, revision, confirmer, draft):
+def prepare(path, requirement, revision, confirmer, draft, *, confirm=None):
     try:
         check(isinstance(requirement, str) and re.fullmatch(r'rec[A-Za-z0-9]+', requirement)
               and type(revision) is int and revision > 0 and isinstance(confirmer, str)
@@ -311,7 +311,7 @@ def prepare(path, requirement, revision, confirmer, draft):
         draft = checked_draft(draft)
         project = Project(path)
         check(confirmer != project.open_id, '助手不能代替计划确认人。')
-        return run(project, requirement, revision, confirmer, draft, confirmation.verify)
+        return run(project, requirement, revision, confirmer, draft, confirmation.verify if confirm is None else confirm)
     except Conflict as exc:
         return result('conflict', str(exc))
     except confirmation.Pending as exc:

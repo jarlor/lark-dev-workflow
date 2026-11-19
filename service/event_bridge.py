@@ -155,7 +155,8 @@ class Journal:
         runner = load(self.runner)
         if not runner.get('event_tenant_key'):
             return None
-        signature = gate_events.signature(load(project), config['tenant_key'])
+        binding = load(project)
+        signature = gate_events.signature(binding, config['tenant_key'])
         try:
             index = load(Path(directory) / gate_events.INDEX)
         except FileNotFoundError:
@@ -163,7 +164,7 @@ class Journal:
         if (index.get('signature') == signature and type(index.get('observed_at')) is int
                 and type(index.get('started_at')) is int
                 and int(time.time()) - gate_events.MAX_AGE <= index['observed_at']):
-            return index
+            return dict(index, project_scope=binding['scope'])
 
     @staticmethod
     def evidenced_after(conn, table_id, record_id, index):
@@ -272,7 +273,32 @@ def file_pin_matches(notice, event, key, expected):
     return bool(values) and all(value == expected for value in values)
 
 
-def gate_changes(event, event_id, table_id, open_id, table, listening_since):
+def project_link_retained(before, after, field_id, scope):
+    """A full record image can repeat the link on an unrelated edit."""
+    old = [field(v, 'field_value') for v in before if field(v, 'field_id') == field_id]
+    new = [field(v, 'field_value') for v in after if field(v, 'field_id') == field_id]
+    if not old and not new:
+        return True
+    if len(old) != 1 or old != new or not isinstance(old[0], str) or len(old[0]) > 8192:
+        return False
+    raw = old[0]
+    project = scope['project_record_id']
+    if raw == project:
+        return True
+    try:
+        value = json.loads(raw)
+    except (ValueError, RecursionError):
+        return False
+    if isinstance(value, list) and len(value) == 1:
+        value = value[0]
+    if value == project:
+        return True
+    # Native record reads can include display text alongside table_id and record_ids.
+    return (isinstance(value, dict) and set(value) <= {'table_id', 'record_ids', 'text', 'type'}
+            and value.get('table_id') == scope['project_table_id'] and value.get('record_ids') == [project])
+
+
+def gate_changes(event, event_id, table_id, open_id, table, listening_since, scope):
     members = set(table['records'])
     moved, changes = set(), {}
     revision, timestamp = field(event, 'revision'), field(event, 'update_time')
@@ -282,11 +308,14 @@ def gate_changes(event, event_id, table_id, open_id, table, listening_since):
             continue
         before = field(action, 'before_value') or []
         after = field(action, 'after_value') or []
-        if (field(action, 'action') == 'record_deleted'
-                or any(field(v, 'field_id') == table['project_field'] for v in [*before, *after])):
+        action_name = field(action, 'action')
+        if (action_name == 'record_deleted'
+                or (action_name != 'record_edited'
+                    and any(field(v, 'field_id') == table['project_field'] for v in [*before, *after]))
+                or not project_link_retained(before, after, table['project_field'], scope)):
             moved.add(record_id)
             continue
-        if (field(action, 'action') != 'record_edited' or not isinstance(open_id, str)
+        if (action_name != 'record_edited' or not isinstance(open_id, str)
                 or not re.fullmatch(r'ou_[a-zA-Z0-9_]{1,128}', open_id)
                 or type(revision) is not int or revision <= 0 or type(timestamp) is not int
                 or timestamp <= max(table.get('since', {}).get(record_id, sys.maxsize), listening_since,
@@ -328,7 +357,7 @@ def receive(envelope, config, journal):
         index = journal.scope(config)
         if index and table_id in index['tables']:
             moved, changes = gate_changes(event, event_id, table_id, actor, index['tables'][table_id],
-                                          journal.started_at)
+                                          journal.started_at, index['project_scope'])
             return journal.mark(event_id, kind, index=index, table_id=table_id, moved=moved, changes=changes,
                                 own=(actor == config['bot_open_id']))
         if actor == config['bot_open_id']:

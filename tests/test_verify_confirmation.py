@@ -89,6 +89,22 @@ class ConfirmationTests(RuntimeFixture):
     def verify(self):
         return verifier.verify(self.service_path, self.role, 'recWork', reader_factory=lambda *a, **k: self.reader)
 
+    def test_retained_original_event_is_reread_and_must_match_row_and_current_history(self):
+        with self.journal.connect() as db:
+            event = json.loads(db.execute('SELECT data FROM receipts').fetchone()[0])
+            db.execute('DELETE FROM receipts')
+        def check(source):
+            return verifier.verify(self.service_path, self.role, 'recWork',
+                                   reader_factory=lambda *a, **k: self.reader, receipt_reader=source)
+        source = mock.Mock(return_value=event)
+        self.assertEqual(self.verify()['status'], 'pending')
+        self.assertEqual(check(source)['status'], 'verified')
+        self.assertEqual(source.call_count, 2)
+        self.assertEqual(check(lambda *args: dict(event, record_id='recOther'))['status'], 'pending')
+        self.assertEqual(check(mock.Mock(side_effect=[event,dict(event, event_id='other')]))['status'], 'pending')
+        self.change['after'] = '已撤回'
+        self.assertEqual(check(source)['status'], 'pending')
+
     def test_unique_human_transition_and_stable_version_from_real_receiver(self):
         self.entries.insert(0, dict(activity_type='update', rev=21, create_time=self.now-4,
                                     operator='其他人', field_changes=[dict(field_id='fldnext_step')]))
