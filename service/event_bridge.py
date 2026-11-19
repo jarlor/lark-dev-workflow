@@ -94,6 +94,16 @@ def runner_pins(config):
     return tuple(str(Path(path).resolve()) for path in paths)
 
 
+
+def journal_identity(config):
+    identity = [*(config[key] for key in PINS), sorted(config['table_ids'])]
+    return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+
+def writer_identity(runner, paths):
+    pinned = [str(Path(runner).resolve()), *paths]
+    return hashlib.sha256(json.dumps(pinned).encode()).hexdigest()
+
 class Journal:
     """Bounded duplicate suppression and optional, project-scoped gate observations."""
 
@@ -106,8 +116,7 @@ class Journal:
         self.runner = config.get('runner_config')
         self.runner_paths = runner_pins(config) if self.runner else None
         self.started_at = int(time.time())
-        identity = [*(config[key] for key in PINS), sorted(config['table_ids'])]
-        signature = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+        signature = journal_identity(config)
         with self.connect() as conn:
             conn.execute('CREATE TABLE IF NOT EXISTS seen (seq INTEGER PRIMARY KEY, id TEXT UNIQUE NOT NULL)')
             conn.execute('CREATE TABLE IF NOT EXISTS state (singleton INTEGER PRIMARY KEY CHECK(singleton=1), '
@@ -125,8 +134,7 @@ class Journal:
             conn.execute('CREATE TABLE IF NOT EXISTS membership_barriers(table_id TEXT, record_id TEXT, '
                          'closed_at INTEGER, reopened_at INTEGER, PRIMARY KEY(table_id, record_id))')
             if self.runner:
-                pinned = [str(Path(config['runner_config']).resolve()), *self.runner_paths]
-                identity_hash = hashlib.sha256(json.dumps(pinned).encode()).hexdigest()
+                identity_hash = writer_identity(self.runner, self.runner_paths)
                 conn.execute('INSERT OR IGNORE INTO writer VALUES (1,?)', (identity_hash,))
                 if conn.execute('SELECT binding FROM writer').fetchone()[0] != identity_hash:
                     raise ValueError('Service state is already bound to another runner.')
@@ -231,6 +239,8 @@ class Journal:
             row = json.loads(payload)
             table = index['tables'].get(row['table_id'])
             if (table and row['record_id'] in table['records'] and row['field_id'] in table['fields']
+                    and (row.get('value_format') != gate_events.NATIVE_STAGE_IDS or
+                         row['field_id'] == table.get('native_stage_field_id'))
                     and row['update_time'] > table['since'][row['record_id']]):
                 filtered.append(dict(row, generation=row_generation))
         atomic_json(Path(directory) / gate_events.BATCH, dict(signature=index['signature'], journal_id=journal_id,
@@ -281,19 +291,18 @@ def gate_changes(event, event_id, table_id, open_id, table, listening_since):
                                     int(time.time()) - gate_events.MAX_AGE)
                 or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', event_id)):
             continue
-        for field_id, kind in table['fields'].items():
+        for field_id in table['fields']:
             old = [field(v, 'field_value') for v in before if field(v, 'field_id') == field_id]
             new = [field(v, 'field_value') for v in after if field(v, 'field_id') == field_id]
             if len(old) != 1 or len(new) != 1:
                 continue
             try:
-                previous, current = (gate_events.parsed_value(v, kind, table['options']) for v in (old[0], new[0]))
+                values = gate_events.changed_values(table, field_id, old[0], new[0])
             except (ValueError, TypeError):
                 continue
-            if previous != current:
+            if values:
                 change = dict(event_id=event_id, table_id=table_id, record_id=record_id, field_id=field_id,
-                              operator_open_id=open_id, event_revision=revision, update_time=timestamp,
-                              before=previous, after=current)
+                              operator_open_id=open_id, event_revision=revision, update_time=timestamp, **values)
                 key = (record_id, field_id)
                 if key not in changes:
                     changes[key] = change

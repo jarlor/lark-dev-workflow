@@ -62,7 +62,7 @@ systemd-run --wait --pipe --collect --property=User=lark-workflow \
 
 飞书自带的「修改记录」自动化可以改变流程状态。测试时，当前节点的必填项还空着，自动化也推进了记录。若项目采用这条路径，在触发条件中明确检查当前是 AI 负责的节点、这一行所需的资料已填齐，再只更新触发这次变化的记录。用缺资料、填齐和重复触发三种情况试跑，并核对记录历史。自动化写下的状态只能证明规则运行过；人的确认仍需核对确认人亲自做的操作。
 
-如需核对是谁点了节点，先给独立助手执行器配置 `event_tenant_key`（初始化参数 `--event-tenant-key`），填前面配对得到的值。让服务的 `runner_config` 指向该执行器，先成功运行一次只读 `scan`。现有接收器会为扫描已确认属于该项目的需求、Bug 和研发项，保存最近 256 笔状态或修订变化，包括操作者的应用内 ID、记录和字段 ID、事件 ID、编辑时间、表版本与能识别的前后值。评论和计划正文不进入这份记录。普通 observe 仍只记计数；配好这项功能的 observe 可留存核对材料，两种 observe 均不启动 Codex。两次完整扫描中一直属于该项目的记录，延迟送达的变更仍可核对，最多回看 24 小时。首次看到这条记录、改过项目后重新看到它、首次启动本次监听时，精确到同一秒的变更只作提示。选项改名后按本次扫描读到的选项核对，无法识别前后状态时也只作提示。用服务状态里的 `retained_gate_changes` 查看现存几笔材料。
+如需核对是谁点了节点，先给独立助手执行器配置 `event_tenant_key`（初始化参数 `--event-tenant-key`），填前面配对得到的值。让服务的 `runner_config` 指向该执行器，先成功运行一次只读 `scan`。现有接收器会为扫描已确认属于该项目的需求、Bug 和研发项，保存最近 256 笔状态或修订变化，包括操作者的应用内 ID、记录和字段 ID、事件 ID、编辑时间、表版本与能识别的前后值。评论和计划正文不进入这份记录。普通 observe 仍只记计数；配好这项功能的 observe 可留存核对材料，两种 observe 均不启动 Codex。两次完整扫描中一直属于该项目的记录，延迟送达的变更仍可核对，最多回看 24 小时。首次看到这条记录、改过项目后重新看到它、首次启动本次监听时，精确到同一秒的变更只作提示。选项改名后按本次扫描读到的选项核对，实际确认是原生流程字段时，前后值有时只有两个节点编号。会保留这两个编号，交给执行器查这条记录的历史。只有前后编号、查不到历史对应的节点名称或操作人时，保留待确认；其他未知格式只作提示。用服务状态里的 `retained_gate_changes` 查看现存几笔材料。
 
 专用助手能读到流程状态名称，但读不到节点权限和必填规则时，可在 Linux 上运行：
 
@@ -72,7 +72,19 @@ sh /path/to/lark-dev-workflow/scripts/unattended.sh scan --config /path/to/runne
 
 这会读全项目记录和评论，核对原生字段类型、可见状态和绑定时的顺序。结果单独保存在执行器状态目录的 `native-stage-inspection/`。已配对组织时，这次检查也会为本项目的记录登记事件范围。读到一条人点过的记录后，再按下文核实是谁点的、确认了哪一版。身份交接、绑定迁移和自动派工仍使用完整检查。
 
-用一条测试研发项验证计划确认。助手填入第 1 版计划，指定的人点「完成节点」。用助手身份对这条记录运行 `lark-cli base +record-history-list`，核对记录、前后状态、实际操作人和当时的计划。单条历史需要 `base:history:read`。历史只返回姓名时，按[执行器的核对方法](../skill/lark-dev-workflow/references/unattended-worker.md)对照本次事件和现有修订；缺少确切依据或计划已改时继续等待。测试时还须验证原生流程字段是否实际返回了可识别的两个节点值。[飞书记录历史命令](https://github.com/larksuite/cli/blob/v1.0.98/shortcuts/base/record_history_list.go) · [飞书记录变更事件](https://open.feishu.cn/document/docs/bitable-v1/events/bitable_record_changed)
+用一条测试研发项验证计划确认。助手填入第 1 版计划，指定的人点「完成节点」。用助手身份对这条记录运行 `lark-cli base +record-history-list`，核对记录、前后状态、实际操作人和当时的计划。单条历史需要 `base:history:read`。历史只返回姓名时，按[执行器的核对方法](../skill/lark-dev-workflow/references/unattended-worker.md)对照本次事件和现有修订；缺少确切依据或计划已改时继续等待。测试时分别验证真人点节点和自动化改节点，区分谁完成了哪一步。[飞书记录历史命令](https://github.com/larksuite/cli/blob/v1.0.98/shortcuts/base/record_history_list.go) · [飞书记录变更事件](https://open.feishu.cn/document/docs/bitable-v1/events/bitable_record_changed)
+
+### 核对刚收到的一次确认
+
+使用运行长连接的 Linux 账号，在安装包根目录运行下面的只读命令。用实际服务配置和记录编号替换示例。`requirements` 和 `bugs` 用于范围确认，`work` 用于研发计划。
+
+```sh
+python3 service/verify_confirmation.py --config /etc/lark-dev-workflow/demo/bridge.json --role work --record-id recExample
+```
+
+工具从该服务的事件日志取操作者，用同一助手从飞书通讯录核对人员账号，再读这一行和它的修改历史。它核对具体修改、指定确认人、范围或计划和业务修订。如果事件只含两个原生节点编号，就只用这行、这个字段、同一表版本和同一秒的唯一历史变化解释这一次操作。同秒有多笔可能的操作、确认人变了、改过计划或历史不全时，返回 `pending` 并说明原因。通讯录不可见时也返回待核实。
+
+`verified` 表示这条记录的这一版已由指定人员账号完成该步。工具只核对本行字段。范围或计划引用外部说明时，须另查当时和现在的文档版本。安排开发前仍需查上游范围、Bug 复现、项目约定和依赖。如果原事项已经保存了同一版本的可靠确认依据，可以继续使用。接收器保留新事件的时间有限，记录过期不会撤销已有确认，也不用请人再点一次。
 
 ## 启动同一个执行器
 

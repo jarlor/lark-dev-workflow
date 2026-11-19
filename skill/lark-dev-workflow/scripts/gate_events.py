@@ -13,6 +13,7 @@ BATCH = 'gate-event-batch.json'
 WORK = 'gate-event-work.json'
 LIMIT = 256
 MAX_AGE = 86400
+NATIVE_STAGE_IDS = 'native_stage_option_ids'
 FIELDS = {'requirements': ('revision', 'confirmed_revision'), 'bugs': ('revision', 'confirmed_revision'),
           'work': ('plan_revision', 'confirmed_plan_revision')}
 
@@ -43,6 +44,22 @@ def option_names(entries):
     return options
 
 
+def verified_native_status(snapshot, field_key, status, mapped):
+    if status.get('type') != 'stage':
+        return False
+    observed = snapshot.get('native_stage_inspection', {}).get(field_key, {})
+    if (type(observed.get('native_type')) is int and observed['native_type'] == 24
+            and observed.get('ui_type') == 'Stage' and observed.get('cli_type') in ('select', 'stage')
+            and 'native_stage_inspection' in snapshot['coverage']):
+        return True
+    actual = snapshot.get('stage_fields', {}).get(field_key, {})
+    if (actual.get('type') == 'stage' and actual.get('id') == status['id']
+            and isinstance(status.get('stage_contract'), dict) and isinstance(actual.get('stage_config'), dict)):
+        from stage_contract import problems
+        return not problems(actual, status['stage_contract'], mapped)
+    return False
+
+
 def project_records(binding, snapshot):
     """Check the real project link again, independent of the event's table ID."""
     scope = binding['scope']
@@ -66,7 +83,8 @@ def project_records(binding, snapshot):
                 or project.get('target_table_id') != scope['project_table_id']):
             continue
         table_id, status_id = table['id'], status['id']
-        actual = snapshot.get('gate_status_options', {}).get(table_id + '/' + status_id, [])
+        field_key = table_id + '/' + status_id
+        actual = snapshot.get('gate_status_options', {}).get(field_key, [])
         options = option_names(actual)
         if not options:
             continue
@@ -83,6 +101,8 @@ def project_records(binding, snapshot):
                     and links[0].get('id') == project_id):
                 members.add(record)
         tables[table_id] = dict(project_field=project['id'], fields=tracked, options=options, records=sorted(members))
+        if verified_native_status(snapshot, field_key, status, fields):
+            tables[table_id]['native_stage_field_id'] = status_id
     return tables
 
 
@@ -99,7 +119,9 @@ def publish_scope(config, binding, snapshot, directory, *, started_at=None):
             previous = {}
         for table_id, table in scope['tables'].items():
             prior_table = previous.get('tables', {}).get(table_id, {})
-            prior = prior_table.get('since', {}) if prior_table.get('options') == table['options'] else {}
+            same_field = (prior_table.get('options') == table['options'] and
+                          prior_table.get('native_stage_field_id') == table.get('native_stage_field_id'))
+            prior = prior_table.get('since', {}) if same_field else {}
             table['since'] = {record: max(prior.get(record, observed_at), observed_at - MAX_AGE)
                               for record in table['records']}
         atomic_json(directory / INDEX, scope)
@@ -122,6 +144,33 @@ def parsed_value(raw, kind, options):
     raise ValueError('Unknown status or revision representation')
 
 
+def opaque_pair(before, after):
+    return (isinstance(before, str) and isinstance(after, str) and before != after
+            and re.fullmatch(r'opt[A-Za-z0-9]{1,64}', before) is not None
+            and re.fullmatch(r'opt[A-Za-z0-9]{1,64}', after) is not None)
+
+
+def wire_option(raw):
+    if not isinstance(raw, str) or len(raw) > 72:
+        return None
+    # A single ID may be a raw string or a JSON string literal. Ignore nested
+    # values, display text, and any ambiguous or decorated representation.
+    if re.fullmatch(r'"opt[A-Za-z0-9]{1,64}"', raw):
+        return raw[1:-1]
+    return raw
+
+
+def changed_values(table, field_id, old, new):
+    if field_id == table.get('native_stage_field_id'):
+        before, after = wire_option(old), wire_option(new)
+        if opaque_pair(before, after):
+            return dict(before=before, after=after, value_format=NATIVE_STAGE_IDS)
+    kind = table['fields'][field_id]
+    before, after = (parsed_value(v, kind, table['options']) for v in (old, new))
+    if before != after:
+        return dict(before=before, after=after)
+
+
 def pending(directory, scope, state):
     if not scope or not (directory / BATCH).is_file():
         return [], None
@@ -140,7 +189,7 @@ def pending(directory, scope, state):
         return [], None
     rows = []
     for item in batch['rows'][-LIMIT:]:
-        if (not isinstance(item, dict) or set(item) != {'table_id', 'record_id', 'field_id', 'event_id',
+        if (not isinstance(item, dict) or set(item) - {'value_format'} != {'table_id', 'record_id', 'field_id', 'event_id',
                 'operator_open_id', 'event_revision', 'update_time', 'before', 'after', 'generation'}
                 or any(not isinstance(item[k], str) for k in
                        ('table_id', 'record_id', 'field_id', 'event_id', 'operator_open_id'))
@@ -156,6 +205,11 @@ def pending(directory, scope, state):
                 (prior and prior[0] == checkpoint[0] and item['generation'] <= prior[1])):
             continue
         kind = table['fields'][item['field_id']]
+        if 'value_format' in item:
+            if (item['value_format'] == NATIVE_STAGE_IDS and item['field_id'] == table.get('native_stage_field_id')
+                    and opaque_pair(item['before'], item['after'])):
+                rows.append(item)
+            continue
         try:
             previous, current = (parsed_value(json.dumps(item[k]), kind, table['options'])
                                  for k in ('before', 'after'))

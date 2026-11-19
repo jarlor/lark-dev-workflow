@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
 READ_COMMANDS = frozenset({
-    '+base-get', '+table-list', '+field-list', '+base-block-list',
+    '+base-get', '+table-list', '+field-list', '+base-block-list', '+record-history-list',
     '+view-list', '+view-get-visible-fields', '+view-get-filter',
     '+form-list', '+form-questions-list', '+form-share-get', '+record-get',
 })

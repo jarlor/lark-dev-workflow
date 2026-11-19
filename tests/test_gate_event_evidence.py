@@ -15,6 +15,8 @@ import event_bridge as bridge
 import comments
 import gate_events
 import watch
+import browser_watch
+from test_browser_watch import stage_field
 from test_watch import FakeCli
 
 
@@ -205,14 +207,96 @@ class GateEventTests(RuntimeFixture):
         bridge.receive(envelope, self.service, self.journal)
         self.assertEqual([(r['event_id'],r['record_id']) for r in self.publish()['rows']], [('evtA','recSecond')])
 
+    def inspected_native_field(self):
+        self.snapshot['coverage']['native_stage_inspection'] = {
+            'node_settings_verified': False, 'dispatch_verified': False}
+        self.snapshot['native_stage_inspection'] = {
+            'tblWork/fldStatus': dict(native_type=24, ui_type='Stage', cli_type='select')}
+
+    def test_inspected_stage_preserves_opaque_wire_ids_and_requires_history(self):
+        self.inspected_native_field()
+        scope = self.scan()
+        self.assertEqual(scope['tables']['tblWork']['native_stage_field_id'], 'fldStatus')
+        self.receive('quoted', before='optUnknownA', after='optUnknownB')
+        raw = self.event('plain')
+        action = raw['event']['action_list'][0]
+        action['before_value'][0]['field_value'] = 'optUnknownB'
+        action['after_value'][0]['field_value'] = 'optUnknownC'
+        bridge.receive(raw, self.service, self.journal)
+        self.receive('unchanged', before='optA', after='optA')
+        self.receive('mixedContent', before='optA', after='公开文字')
+        self.receive('nested', before=['optA'], after=['optB'])
+        self.receive('long', before='opt'+'A'*100, after='optB')
+        self.receive('unknownRecord', record='recOther', before='optA', after='optB')
+        self.receive('otherField', field_id='fldRev', before='optA', after='optB')
+        self.assertFalse(self.receive('self', actor='ou_assistant', before='optA', after='optB'))
+        self.assertEqual([(r['event_id'], r['value_format'], r['before'], r['after'])
+                          for r in self.publish()['rows']], [
+            ('quoted', 'native_stage_option_ids', 'optUnknownA', 'optUnknownB'),
+            ('plain', 'native_stage_option_ids', 'optUnknownB', 'optUnknownC')])
+        rows, checkpoint = gate_events.pending(self.directory, scope, {})
+        self.assertEqual([r['event_id'] for r in rows], ['quoted', 'plain'])
+        self.assertEqual(gate_events.pending(self.directory, scope, {'gate_event_checkpoint':checkpoint}), ([],None))
+
+    def test_opaque_ids_do_not_transfer_to_select_unproven_stage_or_moved_record(self):
+        self.inspected_native_field()
+        self.scan()
+        self.receive('valid', before='optSecretA', after='optSecretB')
+        saved = self.publish()
+        self.snapshot.pop('native_stage_inspection')
+        self.snapshot['coverage'].pop('native_stage_inspection')
+        scope = self.scan()
+        self.assertNotIn('native_stage_field_id', scope['tables']['tblWork'])
+        self.assertEqual(gate_events.pending(self.directory, scope, {})[0], [])
+        self.receive('unproven', before='optUnprovenA', after='optUnprovenB')
+        self.binding['tables']['work']['fields']['status']['type'] = 'select'
+        self.inspected_native_field()
+        write_json(self.project_path, self.binding)
+        scope = self.scan()
+        self.assertNotIn('native_stage_field_id', scope['tables']['tblWork'])
+        self.receive('select', before='optUnmappedA', after='optUnmappedB')
+        self.assertEqual(self.publish()['rows'], [])
+        self.assertNotIn(b'optUnmappedA', self.journal.path.read_bytes())
+        self.assertNotIn(b'optUnprovenA', self.journal.path.read_bytes())
+        self.binding['tables']['work']['fields']['status']['type'] = 'stage'
+        write_json(self.project_path, self.binding)
+        self.row['fields']['fldProject'] = [{'id':'elsewhere'}]
+        scope = self.scan()
+        write_json(self.directory / gate_events.BATCH, saved)
+        self.assertEqual(gate_events.pending(self.directory, scope, {})[0], [])
+
+    def test_strict_worker_discovers_opaque_native_observation_once(self):
+        actual = browser_watch.field(stage_field())
+        actual['id'] = 'fldStatus'
+        self.snapshot['stage_fields'] = {'tblWork/fldStatus': actual}
+        fields = self.binding['tables']['work']['fields']
+        fields.update(plan_confirmer=dict(id='fldOwner', type='user'), plan=dict(id='fldPlan', type='text'))
+        fields['status']['stage_contract'] = {'steps': [
+            dict(name='待确认计划', actor='human', person_field='plan_confirmer', required_fields=['plan']),
+            dict(name='可开始', actor='ai', person_field=None, required_fields=[])], 'done':'已交付', 'cancelled':'已取消'}
+        write_json(self.project_path, self.binding)
+        self.assertEqual(self.tick()['status'], 'ran')
+        self.assertEqual(self.scan()['tables']['tblWork']['native_stage_field_id'], 'fldStatus')
+        self.receive('eventNative', before='optUnknownA', after='optUnknownB')
+        self.publish()
+        self.assertEqual(self.tick()['status'], 'ran')
+        packet = json.loads((self.calls[-1]['dir'] / 'work-packet.json').read_text())
+        items = json.loads(Path(packet['gate_event_observations_file']).read_text())['items']
+        self.assertEqual([(i['record_id'], i['value_format'], i['before'], i['after']) for i in items],
+                         [('recItem', 'native_stage_option_ids', 'optUnknownA', 'optUnknownB')])
+        self.assertEqual(self.tick()['status'], 'unchanged')
+
     @unittest.skipUnless(importlib.util.find_spec('lark_oapi'), 'optional service SDK is not installed')
     def test_real_sdk_passes_typed_fields_through_existing_receiver(self):
         import lark_oapi as sdk
+        self.inspected_native_field()
         self.scan()
-        event = self.event()
+        event = self.event(before='optAlpha', after='optBeta')
         event['schema'] = '2.0'
         bridge.dispatcher(sdk, self.service, self.journal)._do_without_validation(json.dumps(event).encode())
-        self.assertEqual(self.publish()['rows'][0]['operator_open_id'], 'ou_person')
+        row, = self.publish()['rows']
+        self.assertEqual((row['operator_open_id'], row['value_format'], row['before'], row['after']),
+                         ('ou_person', 'native_stage_option_ids', 'optAlpha', 'optBeta'))
 
     def test_new_successful_scan_scope_and_changed_pins_fail_closed(self):
         self.scan()
