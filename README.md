@@ -2,9 +2,9 @@
 
 一份可复制的飞书研发管理模板，以及操作它的 `lark-dev-workflow` Skill。默认一个 Base 管理多个项目，每次操作使用“06 项目”中的真实项目 ID。
 
-**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v2.1.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.1.0)**
+**[使用飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)** · **[安装 Skill](#安装)** · **[下载 v2.2.0 完整发布包](https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.0)**
 
-本包 Skill 为 **v2.1.0**，新版模板规范为 **2.0.0**。线上模板的实际版本以页面和 Release 中的部署结果为准；`template/release.json` 保留打包时的核对信息，不能仅凭下载包版本认定线上已升级。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
+本包 Skill 为 **v2.2.0**，新版模板规范为 **2.0.0**。线上模板的实际版本以页面和 Release 中的部署结果为准；`template/release.json` 保留打包时的核对信息，不能仅凭下载包版本认定线上已升级。打开模板后点击「使用该模板」，在自己的飞书空间生成副本，再把副本链接交给 Agent 接入。
 
 | 交付物 | 位置 | 用途 |
 |---|---|---|
@@ -14,6 +14,14 @@
 | 项目配置 | 目标项目的 `.lark-dev-workflow/project.json` | 绑定共享 Base 中本项目的真实记录、字段、文档章节和维护约定 |
 
 模板提供结构和入口，Skill 负责业务判断。具体边界见 [模板与 Skill 职责](模板与Skill职责.md)。
+
+## v2.2.0 在飞书里确认，Linux 助手接着办
+
+项目可以用独立的飞书助手通知负责人。记录改了、有人 @ 助手或回复它时，Linux 上的服务会叫醒原来的 Codex。普通评论由同一个服务定期补查。启用前先在测试副本走完确认流程，再按切换说明交接原定时任务。
+
+测试副本中，反馈人把需求从「待确认」推进到「可研发」，首次核对遇到问题，助手随后用已收到的事件和飞书记录历史核实了这次点击，反馈人只点了一次。它随后关联了一条研发项，写好计划，在研发项里 @ 计划确认人一次。计划确认人再点「完成节点」，同一个服务收到了这次变更，唤醒原 Codex，并核实了这版计划已到「可开始」。两次点击都由本人完成。
+
+仅启用反馈和计划模式（`native_stage_mode=prepare`）时，助手负责写计划、发提醒和核对人的确认。启动开发需要另行验证项目的执行方式。此次实测使用测试副本，正式项目仍按原有方式运行。模板规范仍为 **2.0.0**，已有副本沿用原字段。
 
 ## v2.1.0 接入测试环境和人工验收
 
@@ -89,7 +97,7 @@ Linux 的配置、试跑、安装、暂停及移除方法见 [定时运行说明
 
 ### Linux 飞书长连接
 
-在运行 Codex CLI 的服务器上，使用包含 `service/` 和 `skill/` 两个同级目录的完整包。先用对应 Release 的 `SHA256SUMS` 校验 ZIP，再从解压后的根目录打开[服务安装与切换说明](service/README.md)。`npx skills add` 只安装下面的 Skill。已发布的 v2.1.0 包含原来的 crontab 方式，长连接服务仍在测试。
+从 v2.2.0 Release 下载完整 ZIP 和 `SHA256SUMS`，在运行 Codex CLI 的 Linux 服务器上核对校验值，解压时保留同级的 `service/` 和 `skill/`。用项目所属组织的专用助手接入测试副本。原来使用本人账号或定时任务的项目可继续沿用原配置。安装命令 `npx skills add` 只安装 Skill。详见[服务安装与切换说明](service/README.md)。
 
 ### 安装 Skill
 
@@ -104,7 +112,7 @@ npx skills add jarlor/lark-dev-workflow --skill lark-dev-workflow --agent codex 
 固定使用本版本时，可从标签路径安装：
 
 ```bash
-npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v2.1.0/skill/lark-dev-workflow --agent codex -g
+npx skills add https://github.com/jarlor/lark-dev-workflow/tree/v2.2.0/skill/lark-dev-workflow --agent codex -g
 ```
 
 Linux 已安装时，可重新执行上面的固定版本安装命令更新本 Skill。先保留项目配置和运行状态；手动安装或本地改过 Skill 的机器，先核对安装位置与差异，不覆盖个人修改。不要为了更新本技能运行会更新所有技能的命令。
@@ -118,12 +126,12 @@ Linux 已安装时，可重新执行上面的固定版本安装命令更新本 S
 - 网页途径需要 Node.js 22+，复用本机已有、本人已登录的浏览器；配置步骤见 [网页接入说明](skill/lark-dev-workflow/references/browser-access.md)。不要求安装 Lark CLI，不因缺 profile 创建应用或 bot。
 - 已有可用 CLI 用户 profile 的机器可继续使用官方 [Lark CLI](https://github.com/larksuite/cli)，并提供相应的 `lark-base`、`lark-doc`、`lark-drive` 和 `lark-shared` 技能；保持本人 user 身份。既有 CLI 验证使用 Lark CLI 1.0.94、Python 3.9.6，不代表新增网页途径已通过真实验证。
 
-`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v2.1.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v2.1.0/lark-dev-workflow-v2.1.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
+`skills` 只安装 Skill 子目录。正式发布后，新建当前标准模板可下载 [v2.2.0 完整包](https://github.com/jarlor/lark-dev-workflow/releases/download/v2.2.0/lark-dev-workflow-v2.2.0.zip)，解压后保留其中的 `template/`。CLI 接入时将实际 `template/schema.json` 路径交给 `onboard.py --contract`；网页接入则按实际结构核实并保存候选映射。仓库克隆也包含同一目录。首次绑定旧副本应核对它原来的模板版本、契约与实际字段，不默认套用最新契约；来源不明时保留只读发现结果并说明缺口。模板独立保存，安装 Skill 不会自动登录飞书或生成项目配置。
 
 ## 开始使用
 
 1. 打开[公开飞书模板](https://qa2vxy8qipi.feishu.cn/base/O2Tjbsrt7a1XorsQ9O1cKbtJnWg?table=tblmruIMSZp7rVPw&view=vewOKMstkv)，按页面提示登录并点击「使用该模板」，生成自己的研发工作区。也可让 Agent 按发布包的 `template/schema.json` 和两份 XML 在你有权限的空间创建空模板。一个副本可管理多个项目；业务数据写入自己的副本，母版保持为空。实际使用仍遵循飞书账号与租户策略。
-2. 按上面的安装方式安装已发布的 Skill，保留独立的 `template` 目录。选择已有 CLI 用户 profile 或本人网页；凭据留在原工具或浏览器中，不写入项目文件。首版网页 helper 只读已有 Base-only 项目，不能用它完成下方的新项目初始化。
+2. 按上面的安装方式安装已发布的 Skill，保留独立的 `template` 目录。按项目设置选择本人 CLI、本人网页或专用助手。专用助手按上面的 Linux 长连接说明接入。凭据保存在对应的工具、浏览器或服务账号中。首版网页 helper 只读已有 Base-only 项目，不能用它完成下方的新项目初始化。
 3. 把副本链接交给 Codex，说明本次创建或接入哪个项目，以及已有维护约定。已有项目直接绑定 06 中的真实记录；新项目在已授权的接入范围内初始化。
 
 可直接附上实际副本链接并使用：

@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.1.0",
+    "skill_version": "2.2.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -30,11 +30,13 @@
       ],
       "runner_config_formats": [
         1,
-        2
+        2,
+        3
       ],
       "access_modes": [
         "cli_user_profile",
-        "personal_browser"
+        "personal_browser",
+        "dedicated_bot_profile"
       ],
       "browser": {
         "runner_config_format": 2,
@@ -48,7 +50,22 @@
         "supports_stage_fields": true
       },
       "optional_session_max_runs_default": 4,
-      "stage_workflow_requires_explicit_migration": true
+      "stage_workflow_requires_explicit_migration": true,
+      "dedicated_assistant": {
+        "runner_config_format": 3,
+        "minimum_python": "3.10",
+        "service_directory": "service",
+        "skill_directory": "skill/lark-dev-workflow",
+        "runtime": "linux_systemd",
+        "connection": "feishu_long_connection",
+        "event_sources": [
+          "project_record_changes",
+          "mentions_and_replies_to_assistant"
+        ],
+        "ordinary_comments": "periodic_reconciliation",
+        "scheduler": "single_service_reuses_project_tick",
+        "native_stage_mode_prepare": "feedback_plans_and_confirmation_checks_only"
+      }
     },
     "template_versions_read": [
       "1.2.0",
@@ -79,7 +96,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 326,
+  "automated_tests_passed": 447,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -91,8 +108,8 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.1.0",
-  "documentation_updated_on": "2026-11-15",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.2.0",
+  "documentation_updated_on": "2026-11-19",
   "validation_history": {
     "1.1.0": {
       "independent_checks_passed": 15,
@@ -331,36 +348,59 @@
       ],
       "target_linux_installed": false,
       "installation_note": "Patch checked in an isolated directory; installation and live runtime are verified after release."
+    },
+    "2.1.0": {
+      "version": "2.1.0",
+      "date": "2026-11-15",
+      "tests": 326,
+      "environments": [
+        "Python 3.9.6 and Node.js 22.23.2 local",
+        "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
+      ],
+      "scope": [
+        "existing_native_8_table_schema_compatible_without_migration",
+        "ready_target_repository_combination_and_current_health_read_back",
+        "offline_deployment_evidence_checks_and_changed_test_window_detection",
+        "unexecuted_human_test_plans_use_existing_fields",
+        "template_2_0_0_contract_and_existing_binding_unchanged",
+        "twelve_independent_synthetic_behavior_cases",
+        "real_saved_status_and_health_observation_read_only_replay",
+        "mermaid_flowchart_and_documentation_json_examples_verified"
+      ],
+      "not_validated": [
+        "feedback_person_device_access_and_human_acceptance",
+        "complete_real_product_cycle_after_this_skill_upgrade",
+        "production_release"
+      ],
+      "target_linux_installed": false,
+      "installation_note": "Candidate checks do not prove installation. Install and project-rule adoption are verified after release.",
+      "independent_behavior_cases": 12
     }
   },
-  "comment_reader_sha256": "bc11d4ff978f217e4a24fd3a41ce023eaff3cf6d30fe95c1e87d44880cee27f4",
-  "release_version": "2.1.0",
+  "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
+  "release_version": "2.2.0",
   "skill_release_validation": {
-    "version": "2.1.0",
-    "date": "2026-11-15",
-    "tests": 326,
+    "version": "2.2.0",
+    "date": "2026-11-19",
+    "tests": 447,
     "environments": [
-      "Python 3.9.6 and Node.js 22.23.2 local",
-      "Python 3.10.12 and Node.js 22.16.0 isolated directory on target Linux"
+      "local offline suite",
+      "isolated Linux suite",
+      "same-tenant Feishu test copy with a dedicated assistant and a single Linux service"
     ],
     "scope": [
-      "existing_native_8_table_schema_compatible_without_migration",
-      "ready_target_repository_combination_and_current_health_read_back",
-      "offline_deployment_evidence_checks_and_changed_test_window_detection",
-      "unexecuted_human_test_plans_use_existing_fields",
-      "template_2_0_0_contract_and_existing_binding_unchanged",
-      "twelve_independent_synthetic_behavior_cases",
-      "real_saved_status_and_health_observation_read_only_replay",
-      "mermaid_flowchart_and_documentation_json_examples_verified"
+      "same_event_service_wakes_existing_codex_session",
+      "human_requirement_scope_click_recovered_from_received_event_and_record_history",
+      "one_linked_work_plan_and_one_readback_verified_mention_to_plan_reviewer",
+      "human_plan_click_verified_from_normal_receiver_and_record_history",
+      "unchanged_or_repeated_checks_do_not_duplicate_work_or_notice"
     ],
     "not_validated": [
-      "feedback_person_device_access_and_human_acceptance",
-      "complete_real_product_cycle_after_this_skill_upgrade",
-      "production_release"
+      "product_implementation_in_prepare_mode",
+      "production_project_handoff_or_deployment"
     ],
     "target_linux_installed": false,
-    "installation_note": "Candidate checks do not prove installation. Install and project-rule adoption are verified after release.",
-    "independent_behavior_cases": 12
+    "installation_note": "The candidate ran against an isolated test copy. The production project had not switched at packaging."
   },
   "source_at_packaging": {
     "template_version": "2.0.0",
