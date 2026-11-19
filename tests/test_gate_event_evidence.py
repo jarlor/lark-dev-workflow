@@ -141,7 +141,8 @@ class GateEventTests(RuntimeFixture):
         self.scan()
         compact = json.dumps(['recProject'])
         rich = json.dumps([{'table_id':'tblProjects', 'record_ids':['recProject'], 'text':'项目', 'type':'text'}])
-        for i, link in enumerate(('recProject', compact, rich)):
+        links = ('recProject', compact, rich, json.dumps({'link_record_ids':['recProject']}))
+        for i, link in enumerate(links):
             event = self.event(f'full{i}')
             action = event['event']['action_list'][0]
             for side in ('before_value','after_value'):
@@ -150,7 +151,7 @@ class GateEventTests(RuntimeFixture):
             self.assertTrue(bridge.receive(event, self.service, self.journal))
             self.assertFalse(bridge.receive(event, self.service, self.journal))
         self.assertEqual([(row['event_id'],row['field_id']) for row in self.publish()['rows']],
-                         [(f'full{i}','fldStatus') for i in range(3)])
+                         [(f'full{i}','fldStatus') for i in range(len(links))])
 
     def test_full_images_with_unverified_or_changed_membership_invalidate_each_record(self):
         current = json.dumps(['recProject'])

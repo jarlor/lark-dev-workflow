@@ -293,6 +293,9 @@ def project_link_retained(before, after, field_id, scope):
         value = value[0]
     if value == project:
         return True
+    # Native Base field types 18 and 21 serialize the linked record IDs with this key.
+    if value == {'link_record_ids': [project]}:
+        return True
     # Native record reads can include display text alongside table_id and record_ids.
     return (isinstance(value, dict) and set(value) <= {'table_id', 'record_ids', 'text', 'type'}
             and value.get('table_id') == scope['project_table_id'] and value.get('record_ids') == [project])
