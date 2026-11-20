@@ -202,23 +202,38 @@ class EventBridgeTests(unittest.TestCase):
         with mock.patch.object(bridge.subprocess, 'Popen') as start:
             child = start.return_value
             child.poll.return_value = None
-            schedule.poll(1798, 10)
-            schedule.poll(1800, 12)
+            schedule.poll(3600, 10)
+            schedule.poll(7200, 12)
             self.assertEqual(start.call_count, 1)
             child.poll.return_value = 0
-            schedule.poll(1801, 13)
+            schedule.poll(7201, 13)
             self.assertEqual(start.call_count, 2)
             child.poll.return_value = 1
-            schedule.poll(1802, 14)
-            schedule.poll(1840, 52)
+            schedule.poll(7202, 14)
+            schedule.poll(7240, 52)
             self.assertEqual(start.call_count, 2)
-            schedule.poll(2102, 314)
+            schedule.poll(7502, 314)
             child.poll.return_value = 0
-            schedule.poll(2103, 315)
-            schedule.poll(3599, 1811)
+            schedule.poll(7503, 315)
+            schedule.poll(10799, 1811)
             self.assertEqual(start.call_count, 3)
-            schedule.poll(3600, 1812)
+            schedule.poll(10800, 1812)
             self.assertEqual(start.call_count, 4)
+
+    def test_digest_checks_latest_work_at_nine_and_skips_the_night(self):
+        schedule = bridge.DigestSchedule(self.config_path, self.config, (str(self.root),))
+        with mock.patch.object(bridge.subprocess, 'Popen') as start:
+            start.return_value.poll.return_value = 0
+            for ts in (3599, 3600, 3601, 13 * 3600, 14 * 3600 - 1, 14 * 3600, 16 * 3600,
+                       86400 + 3599, 86400 + 3600):
+                schedule.poll(ts, ts)
+            self.assertEqual(start.call_count, 3)
+        schedule = bridge.DigestSchedule(self.config_path, self.config, (str(self.root),))
+        with mock.patch.object(bridge.subprocess, 'Popen') as start:
+            schedule.poll(3600 + 240, 0)
+            start.assert_not_called()
+            schedule.poll(7200, 3360)
+            start.assert_called_once()
 
     def test_existing_service_state_cannot_change_worker_checkout_after_restart(self):
         self.set_dispatch()

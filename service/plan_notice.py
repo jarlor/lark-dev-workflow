@@ -19,6 +19,9 @@ from identity_handoff import sync_directory
 
 
 WAIT_FOR_RECEIVER = '助手还没准备好接收这条事项的确认。请先用同一执行器扫描项目，再检查一次。'
+PLAN_MESSAGE = ' 请看一下第 {revision} 版「{field}」。同意就到「待确认计划」点「完成节点」。想改哪里，直接在这里回复。'
+# Existing send intents and pending requests include the original wording in their hash.
+PREVIOUS_PLAN_MESSAGE = ' 请看这项的「{field}」（第 {revision} 版）。同意按这个做，请在「待确认计划」点「完成节点」。要改哪里，直接回复这条评论就好。'
 
 def fixed_view(project):
     table = project.tables['work']
@@ -173,33 +176,39 @@ def notify(project, record, person, revision, *, expected_request=None):
     plan.check(re.fullmatch(r'tbl[A-Za-z0-9]+', table), '研发表编号有误。')
     anchor = {'block_id': table, 'base_record_id': record, 'base_view_id': view}
     field_name = project.tables['work']['fields']['plan']['name']
-    message = f' 请看这项的「{field_name}」（第 {revision} 版）。同意按这个做，请在「待确认计划」点「完成节点」。要改哪里，直接回复这条评论就好。'
-    elements = [{'type': 'mention_user', 'text': person}, {'type': 'text', 'text': message}]
-    args = ['--doc', project.token, '--type', 'bitable', '--block-id', '!'.join((table, record, view)),
-            '--content', json.dumps(elements, ensure_ascii=False)]
     # Scope the send-once key to the business destination, independent of the recipient, view or bot profile.
     key = plan.digest([project.token, project.project, table, record, revision])
     prefix = project.directory / ('plan-notice-' + key)
     intent_file, accepted_file, verified_file = [prefix.with_suffix('.' + s) for s in ('intent', 'accepted', 'verified')]
-    intent = {'binding': project.signature, 'anchor': anchor, 'revision': revision, 'confirmer': person,
-              'contents': plan.digest([prepared['values'], message])}
     with plan.bridge.exclusive(prefix.with_suffix('.lock')):
-        requested = requested_notice(project, intent)
         request = pending_file(project, key)
         queued = os.path.lexists(request)
         if queued:
             metadata = request.lstat()
             plan.check(stat.S_ISREG(metadata.st_mode) and metadata.st_uid == os.geteuid()
-                       and not metadata.st_mode & 0o077 and plan.bridge.load(request) == requested,
-                       '待发提醒对应的计划、接收人或位置已变。')
+                       and not metadata.st_mode & 0o077, '待发提醒文件的权限不符。')
+        saved_request = plan.bridge.load(request) if queued else None
+        attempted = os.path.lexists(intent_file)
+        saved_intent = plan.bridge.load(intent_file) if attempted else None
+        for template in (PLAN_MESSAGE, PREVIOUS_PLAN_MESSAGE):
+            message = template.format(field=field_name, revision=revision)
+            intent = {'binding': project.signature, 'anchor': anchor, 'revision': revision, 'confirmer': person,
+                      'contents': plan.digest([prepared['values'], message])}
+            requested = requested_notice(project, intent)
+            if (not queued or saved_request == requested) and (not attempted or saved_intent == intent):
+                break
+        else:
+            raise plan.Conflict('原提醒对应的计划、接收人或位置已变。')
         if expected_request is not None:
             plan.check(queued and expected_request == requested, '没有找到与原申请一致的待发提醒。')
-        if os.path.lexists(intent_file):
-            plan.check(plan.bridge.load(intent_file) == intent, '这版计划已有发出记录，但接收人、内容或位置有变化。')
+        if attempted:
             plan.check(accepted_file.exists(), '这版提醒已尝试发送，尚未拿到评论编号。请到本研发项查看。')
             receipt = plan.bridge.load(accepted_file)
         else:
             plan.check(not os.path.lexists(accepted_file) and not os.path.lexists(verified_file), '提醒文件不完整，请先核对。')
+            elements = [{'type': 'mention_user', 'text': person}, {'type': 'text', 'text': message}]
+            args = ['--doc', project.token, '--type', 'bitable', '--block-id', '!'.join((table, record, view)),
+                    '--content', json.dumps(elements, ensure_ascii=False)]
             validate_preview(project, drive(project, '+add-comment', args, preview=True), anchor, person, message)
             plan.check(project.row('work', record) == work, '发送前研发项有变化，请重新核对。')
             project.unchanged()

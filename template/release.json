@@ -73,9 +73,13 @@
           "interval_minutes": [
             5,
             10,
-            30
+            30,
+            60
           ],
-          "default_interval_minutes": 30
+          "default_interval_minutes": 60,
+          "time_zone": "Asia/Shanghai",
+          "send_from_inclusive": "09:00",
+          "send_until_exclusive": "22:00"
         }
       }
     },
@@ -565,13 +569,13 @@
     "template_version": "2.0.0",
     "scope": [
       "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
-      "The dedicated assistant uses its existing scheduler. The configurable digest interval is 5, 10, or 30 minutes, defaulting to 30."
+      "The dedicated assistant uses its existing scheduler. Digests default to hourly at the top of the hour from 09:00 to 21:00 Beijing time. Each morning starts with the current outstanding actions."
     ],
     "status": "test_preview_verified_awaiting_human_acceptance",
     "observations": [
-      "A one-off Linux preview against an isolated same-tenant test copy at a five-minute interval prepared one direct message for one directory-verified recipient."
+      "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records."
     ],
-    "tests": 581,
+    "tests": 586,
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"

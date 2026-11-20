@@ -2,6 +2,7 @@
 """Receive Feishu change hints and schedule the existing local project tick."""
 import argparse
 import contextlib
+from datetime import datetime, timedelta, timezone
 import fcntl
 import hashlib
 import json
@@ -44,6 +45,14 @@ def nonempty(value):
     return isinstance(value, str) and 0 < len(value) <= 512 and value == value.strip()
 
 
+BEIJING = timezone(timedelta(hours=8))
+DEFAULT_DIGEST_MINUTES = 60
+
+
+def digest_window_open(timestamp):
+    return 9 <= datetime.fromtimestamp(timestamp, BEIJING).hour < 22
+
+
 def config_from(path):
     config = load(path)
     required = set(PINS) | {'table_ids', 'state_dir'}
@@ -63,9 +72,9 @@ def config_from(path):
     digest = config.get('human_digest', False)
     if type(digest) is not bool or (digest and config['mode'] != 'dispatch'):
         raise ValueError('human_digest requires a boolean and an active dispatch service.')
-    minutes = config.get('human_digest_minutes', 30)
-    if type(minutes) is not int or minutes not in (5, 10, 30):
-        raise ValueError('human_digest_minutes must be 5, 10 or 30.')
+    minutes = config.get('human_digest_minutes', DEFAULT_DIGEST_MINUTES)
+    if type(minutes) is not int or minutes not in (5, 10, 30, 60):
+        raise ValueError('human_digest_minutes must be 5, 10, 30 or 60.')
     for key, (default, minimum, maximum) in TIMERS.items():
         value = config.setdefault(key, default)
         if type(value) is not int or not minimum <= value <= maximum:
@@ -579,13 +588,13 @@ def retry_after_tick(path, config, paths, status, listener):
 
 
 class DigestSchedule:
-    """Run at startup and at the configured time boundaries independently of the project tick."""
+    """Start on daytime time boundaries independently of the project tick."""
 
     def __init__(self, path, config, paths):
         self.command = [sys.executable, str(Path(__file__).with_name('human_digest.py')),
                         '--config', str(path), '--pin', deferred_notices.binding_pin(config, paths)]
         self.workdir = paths[0]
-        self.interval = config.get('human_digest_minutes', 30) * 60
+        self.interval = config.get('human_digest_minutes', DEFAULT_DIGEST_MINUTES) * 60
         self.process = None
         self.slot = None
         self.retry_at = 0
@@ -599,7 +608,10 @@ class DigestSchedule:
             if result:
                 self.retry_at = monotonic + 300
                 print('Human digest incomplete; retry in five minutes.', file=sys.stderr, flush=True)
-        slot = int(wall_time) // self.interval
+        slot, offset = divmod(int(wall_time), self.interval)
+        if not digest_window_open(wall_time) or (self.slot is None and offset >= 60):
+            self.slot, self.retry_at = slot, 0
+            return
         if self.slot == slot and (not self.retry_at or monotonic < self.retry_at):
             return
         self.slot, self.retry_at = slot, 0

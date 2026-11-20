@@ -182,18 +182,19 @@ class Project:
         return people
 
     def message(self, person, body, key, *, preview, before_send):
-        args = ['im', '+messages-send', '--user-id', person, '--text', body, '--idempotency-key', key]
+        args = ['im', '+messages-send', '--user-id', person, '--msg-type', 'post',
+                '--content', packed(body), '--idempotency-key', key]
         data = self.command([*args, '--dry-run'], '私信预览', preview=True)
         calls = data.get('api')
         check(data.get('context', {}).get('app_id') == self.actor['app_id']
               and isinstance(calls, list) and len(calls) == 1, '私信预览的应用或请求数不符。')
-        expected_body = {'receive_id': person, 'uuid': key, 'msg_type': 'text'}
+        expected_body = {'receive_id': person, 'uuid': key, 'msg_type': 'post'}
         call = calls[0]
         actual = dict(call.get('body', {}))
         content = json.loads(actual.pop('content', 'null'))
         check(call.get('method') == 'POST' and call.get('url') == '/open-apis/im/v1/messages'
               and call.get('params') == {'receive_id_type': 'open_id'} and actual == expected_body
-              and content == {'text': body}, '私信预览的接收人、文字或去重编号不符。')
+              and content == body, '私信预览的接收人、内容、链接或去重编号不符。')
         self.unchanged()
         before_send()
         if preview:
@@ -210,33 +211,89 @@ def single_line(text, limit):
     return line if len(line) <= limit else line[:limit - 1] + '…'
 
 
-def entry(item):
-    return (f"{single_line(item['number'], 32)}　{single_line(item['title'], 80)}\n"
-            f"{single_line(item['action'], 300)}\n{item['url']}")
+def packed(value):
+    return json.dumps(value, ensure_ascii=False, separators=(',', ':'))
 
 
-def render(binding, items):
-    heading = f"{single_line(binding['project_name'], 60)} · 有 {len(items)} 项等你处理"
-    body = '\n\n'.join([heading, *(entry(item) for item in items)])
-    if len(body.encode()) <= MAX_BODY:
-        return body
-    # Keep one message even for a large backlog. Use the bound tables and record numbers
-    # for the overflow, without including another person's assignments.
-    lines = [heading]
-    groups = {}
-    for item in items:
-        groups.setdefault(item['table_id'], []).append(item)
-    for table_id, rows in groups.items():
-        numbers = '、'.join(single_line(item['number'], 32) for item in rows)
-        lines.extend((f"{len(rows)} 项 · {numbers}", binding['base']['url'] + '?table=' + table_id))
-    compact = '\n'.join(lines)
-    if len(compact.encode()) <= MAX_BODY:
-        return compact
-    lines = [heading]
-    for table_id, rows in groups.items():
-        lines.append(f"{len(rows)} 项 · {single_line(rows[0]['number'], 32)} 等"
-                     + '\n' + binding['base']['url'] + '?table=' + table_id)
-    return '\n\n'.join(lines)
+def entry(item, index):
+    action = ' '.join(item['action'].split())
+    # Give a self-contained request its own line. Keep any conditions and follow-up
+    # questions in reading order underneath it. Plain text nodes cannot add mentions or links.
+    first, punctuation, detail = re.match(r'^(.*?)([。！？!?]|$)(.*)$', action).groups()
+    lead, comma, rest = first.partition('，')
+    if lead.startswith(('请发', '请贴', '请上传', '请分享')) and comma and rest and len(lead) >= 6:
+        first, detail = lead, rest + punctuation + detail
+    elif punctuation in ('？', '?'):
+        first += punctuation
+    rows = [[{'tag': 'text', 'text': f'{index}. {first}', 'style': ['bold']}]]
+    if detail.strip():
+        rows.append([{'tag': 'text', 'text': detail.strip()}])
+    label = {'feedback': '打开反馈', 'requirements': '打开需求', 'bugs': '打开问题记录',
+             'work': '打开研发计划' if item['kind'] == 'plan' else '打开研发记录',
+             'verification': '打开测试记录'}[item['role']]
+    title = item['title'].strip()
+    # An old feedback title can describe a different problem from today's question.
+    # Never use a clipped or historical title to rewrite a question from the record.
+    if title and (item['kind'] != 'clarify' or len(title) <= 26):
+        label += ' · ' + single_line(title, 32)
+    if item['number']:
+        label += '（' + single_line(item['number'], 32) + '）'
+    rows.append([{'tag': 'a', 'text': label, 'href': item['url']}])
+    return rows
+
+
+def order_key(item):
+    return (item['number'], item['table_id'], item['record_id'])
+
+
+def render(binding, items, after=None):
+    project = single_line(binding['project_name'], 60)
+    ordered = sorted(items, key=order_key)
+    heading = f'{project} · 有 {len(items)} 件事需要你处理'
+    post = {'zh_cn': {'title': heading, 'content': []}}
+    rows = post['zh_cn']['content']
+    for i, item in enumerate(ordered, 1):
+        if rows:
+            rows.append([])
+        rows.extend(entry(item, i))
+        if len(packed(post).encode()) > MAX_BODY:
+            break
+    else:
+        return post, ordered
+
+    # Try the compact layout before leaving anything for a later reminder. The
+    # last confirmed record sorts consistently even if it was completed meanwhile.
+    start = next((i for i, item in enumerate(ordered) if order_key(item) > tuple(after or ())), 0)
+    ordered = ordered[start:] + ordered[:start]
+    rows.clear()
+    shown = []
+    for i, item in enumerate(ordered, 1):
+        title = f'{project} · 共 {len(items)} 件待办，这次列出 {i} 件'
+        link = entry(item, i)[-1][0]
+        # Keep the full instruction and all its conditions together.
+        action = ' '.join(item['action'].split())
+        row = [{'tag': 'text', 'text': f'{i}. {action}  '}, link]
+        rows.append(row)
+        post['zh_cn']['title'] = title
+        if len(packed(post).encode()) > MAX_BODY:
+            if shown:
+                rows.pop()
+                post['zh_cn']['title'] = f'{project} · 共 {len(items)} 件待办，这次列出 {len(shown)} 件'
+                break
+            # One unusually long source comment: its record retains the complete
+            # request. Do not send a sentence with a condition cut in half.
+            row[0]['text'] = '1. 请打开这条记录，读完里面的要求后再处理。  '
+            check(len(packed(post).encode()) <= MAX_BODY, '单项链接超出飞书消息长度。')
+        shown.append(item)
+    return post, shown
+
+
+def preview_text(post):
+    content = post['zh_cn']
+    lines = [content['title']]
+    for row in content['content']:
+        lines.append(''.join(node['text'] + (' ' + node['href'] if node['tag'] == 'a' else '') for node in row))
+    return '\n'.join(lines)
 
 
 class Ledger:
@@ -246,6 +303,15 @@ class Ledger:
             self.db.execute('CREATE TABLE IF NOT EXISTS digest_delivery (service TEXT, slot INTEGER, person TEXT, '
                             'body_hash TEXT NOT NULL, message_id TEXT, PRIMARY KEY(service,slot,person))')
             self.db.execute('DELETE FROM digest_delivery WHERE slot < ?', (window - 30 * 86400,))
+            self.db.execute('CREATE TABLE IF NOT EXISTS digest_rotation (service TEXT, person TEXT, slot INTEGER, '
+                            'last_key TEXT, PRIMARY KEY(service,person))')
+            self.db.execute('DELETE FROM digest_rotation WHERE slot < ?', (window - 30 * 86400,))
+
+    def previous(self, route):
+        service, slot, person = route
+        row = self.db.execute('SELECT last_key FROM digest_rotation WHERE service=? AND person=? AND slot<?',
+                              (service, person, slot)).fetchone()
+        return json.loads(row[0]) if row else None
 
     def pending(self, route, body):
         # Persist the exact body hash before POST. A lost response retries only the identical
@@ -257,14 +323,17 @@ class Ledger:
                                      'WHERE service=? AND slot=? AND person=?', route).fetchone()
         return record == (digest, None)
 
-    def ack(self, route, message_id):
+    def ack(self, route, message_id, next_after):
         with self.db:
             self.db.execute('UPDATE digest_delivery SET message_id=? WHERE service=? AND slot=? AND person=?',
                             (message_id, *route))
+            service, slot, person = route
+            self.db.execute('INSERT OR REPLACE INTO digest_rotation VALUES (?,?,?,?)',
+                            (service, person, slot, packed(next_after)))
 
 
 def deliver(project, groups, slot, ledger, *, preview=False, clock=time.time, deadline=None):
-    interval = project.config.get('human_digest_minutes', 30) * 60
+    interval = project.config.get('human_digest_minutes', bridge.DEFAULT_DIGEST_MINUTES) * 60
     report = {'status': 'preview' if preview else 'complete', 'slot': slot, 'recipients': [],
               'messages': 0, 'errors': []}
     # Stable across restarts, directory moves, CLI upgrades and changes to polling settings.
@@ -272,7 +341,9 @@ def deliver(project, groups, slot, ledger, *, preview=False, clock=time.time, de
     service = json.dumps([*identity, interval])
 
     def still_current():
-        check(int(clock()) // interval * interval == slot and (deadline is None or time.monotonic() < deadline),
+        now = clock()
+        check(preview or bridge.digest_window_open(now), '现在是休息时间，早上 9 点再看最新待办。')
+        check(int(now) // interval * interval == slot and (deadline is None or time.monotonic() < deadline),
               '本次读取已超过发送时间，请按当前事项重新核对。')
 
     for person, items in sorted(groups.items()):
@@ -282,19 +353,20 @@ def deliver(project, groups, slot, ledger, *, preview=False, clock=time.time, de
         try:
             check(all(item['table_id'] in project.config['table_ids'] for item in items),
                   '待办所属表超出当前服务范围。')
-            body = render(project.binding, items)
-            if not preview and not ledger.pending(route, body):
+            post, shown = render(project.binding, items, ledger.previous(route) if ledger else None)
+            if not preview and not ledger.pending(route, packed(post)):
                 continue
             still_current()
             project.reader.start_read_window()
             project.confirm_person(person)
             key = str(uuid.uuid5(uuid.NAMESPACE_URL, json.dumps(['lark-human-digest-v1', *route])))
-            receipt = project.message(person, body, key, preview=preview, before_send=still_current)
+            receipt = project.message(person, post, key, preview=preview, before_send=still_current)
             if preview:
-                report['recipients'].append({'open_id': person, 'text': body})
+                result = {'text': preview_text(post), 'post': post}
             else:
-                ledger.ack(route, receipt)
-                report['recipients'].append({'open_id': person, 'message_id': receipt, 'items': len(items)})
+                ledger.ack(route, receipt, order_key(shown[-1]) if len(shown) < len(items) else None)
+                result = {'message_id': receipt, 'items': len(shown)}
+            report['recipients'].append({'open_id': person, **result})
             report['messages'] += 1
         except (OSError, KeyError, AttributeError, ValueError, TypeError, sqlite3.Error,
                 subprocess.SubprocessError, OnboardingError) as exc:
@@ -310,10 +382,13 @@ def run(path, pin, *, preview=False):
     with contextlib.ExitStack() as stack:
         if not preview:
             stack.enter_context(bridge.exclusive(project.directory / 'human-digest.lock'))
+        wall_time = time.time()
+        if not preview and not bridge.digest_window_open(wall_time):
+            return {'status': 'quiet_hours', 'recipients': [], 'messages': 0, 'errors': []}
         started = time.monotonic()
         groups, age = project.current_actions()
-        interval = project.config.get('human_digest_minutes', 30) * 60
-        slot = int(time.time()) // interval * interval
+        interval = project.config.get('human_digest_minutes', bridge.DEFAULT_DIGEST_MINUTES) * 60
+        slot = int(wall_time) // interval * interval
         ledger = None
         if not preview:
             connection = stack.enter_context(contextlib.closing(sqlite3.connect(project.directory / 'human-digest.sqlite')))
@@ -335,7 +410,7 @@ def main():
         result = {'status': 'failed', 'reason': str(exc) if isinstance(exc, (ValueError, OnboardingError))
                   else type(exc).__name__}
     print(json.dumps(result, ensure_ascii=False), flush=True)
-    return 0 if result['status'] in ('complete', 'preview') else 1
+    return 0 if result['status'] in ('complete', 'preview', 'quiet_hours') else 1
 
 
 if __name__ == '__main__':

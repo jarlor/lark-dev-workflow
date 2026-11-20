@@ -122,6 +122,16 @@ class PlanNoticeTests(unittest.TestCase):
         self.directory.assert_called_with(self.project.reader, 'ou_person')
         self.assertEqual(len(list(self.project.directory.glob('*.verified'))), 1)
 
+    def test_queued_old_wording_survives_upgrade_and_existing_receipt_is_reused(self):
+        fcntl.flock(self.receiver, fcntl.LOCK_UN)
+        with mock.patch.object(notice, 'PLAN_MESSAGE', notice.PREVIOUS_PLAN_MESSAGE):
+            self.assertEqual(self.invoke()['status'], 'pending')
+        fcntl.flock(self.receiver, fcntl.LOCK_EX)
+        self.assertEqual(self.invoke()['status'], 'notified')
+        self.assertEqual(self.message, notice.PREVIOUS_PLAN_MESSAGE.format(field='研发计划', revision=1))
+        self.assertEqual(self.invoke()['status'], 'notified')
+        self.assertEqual(self.sends, 1)
+
     def test_wait_for_new_row_then_send_original_notice_once(self):
         scope = copy.deepcopy(self.index)
         scope['tables']['tblWork']['records'] = []

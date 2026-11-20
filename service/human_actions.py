@@ -12,11 +12,11 @@ import watch
 
 
 GATES = {
-    ('requirements', '待确认'): ('confirmer', 'scope', '请核对需求范围和验收标准，同意后完成「待确认」节点。'),
-    ('bugs', '待确认'): ('confirmer', 'scope', '请核对异常、修复范围和验收标准，同意后完成「待确认」节点。'),
-    ('work', '待确认计划'): ('plan_confirmer', 'plan', '请核对研发计划，同意后完成「待确认计划」节点。'),
-    ('requirements', '待验收'): ('acceptor', 'acceptance', '请按验收标准试用，通过后完成「待验收」节点，有问题请在记录下回复。'),
-    ('bugs', '待验收'): ('acceptor', 'acceptance', '请按验收标准复测，通过后完成「待验收」节点，仍能复现请在记录下回复。'),
+    ('requirements', '待确认'): ('confirmer', 'scope', '请看看要改哪些地方、改好后应该什么样。跟你想的一样就{confirm}，有遗漏请在记录下留言。'),
+    ('bugs', '待确认'): ('confirmer', 'scope', '请看看问题写得对不对、准备修哪些地方。如果都对，{confirm}。有遗漏请在记录下留言。'),
+    ('work', '待确认计划'): ('plan_confirmer', 'plan', '请看「研发计划」里准备怎么做。同意就{confirm}，想改的地方请在记录下留言。'),
+    ('requirements', '待验收'): ('acceptor', 'acceptance', '请按记录里的步骤试用这个功能。结果符合预期就{confirm}，遇到问题请在记录下留言。'),
+    ('bugs', '待验收'): ('acceptor', 'acceptance', '请照原来的步骤再试一次。问题解决了就{confirm}，还会出现请在记录下留言。'),
 }
 # Resolved scope, plan and acceptance invitations must never be replayed from comments.
 # A distinct question in the latest addressed comment may still need a reply.
@@ -81,7 +81,7 @@ def instruction(value):
     text = ' '.join(value.split()) if isinstance(value, str) else ''
     sentences = re.split(r'(?<=[。！？!?])', text)
     start = next((i for i, phrase in enumerate(sentences) if ASK_FOR_INFO.search(phrase) or '请' in phrase), 0)
-    return short_text(''.join(sentences[start:]), 160)
+    return ''.join(sentences[start:]).strip()
 
 
 def addressed_question(entry, bot):
@@ -106,13 +106,14 @@ def gate_action(role, stage, row, fields, bot):
             return None
         if any(not row.get(key) for key in step['required_fields']):
             return None
+        confirm = f'在「{stage}」点「完成节点」'
     elif fields['status']['type'] == 'select':
-        action = action.replace('完成「待确认」节点', '把状态改为「可研发」').replace(
-            '完成「待确认计划」节点', '把状态改为「可开始」').replace('完成「待验收」节点', '把状态改为「已验收」')
+        target = {'待确认': '可研发', '待确认计划': '可开始', '待验收': '已验收'}[stage]
+        confirm = f'把状态改为「{target}」'
     else:
         return None
     recipient = person(row, fields, name, bot)
-    return (recipient, kind, action) if recipient else None
+    return (recipient, kind, action.format(confirm=confirm)) if recipient else None
 
 
 def row_action(role, row, fields, bot, latest, source_author):
@@ -134,8 +135,8 @@ def row_action(role, row, fields, bot, latest, source_author):
         if normal and owner and next_step:
             if re.search(r'(?:选|指定|填写|补充|设置|确定).{0,8}负责人|负责人.{0,12}(?:选|填|指定)', next_step):
                 # The live owner field already satisfies an older assignment request.
-                next_step = ('请按已确认的计划开发，实际开工后在记录中更新进展。' if stage == '可开始'
-                             else '请在研发记录中更新当前进展。')
+                next_step = ('请按计划开工。开始后，在这条记录里写下进展。' if stage == '可开始'
+                             else '请在这条记录里写下已经做了什么，还有什么没做。')
             return owner, 'work', next_step
         # A cleared or subsequently changed assignment supersedes the prior @.
         return question if question and question[0] == owner else None
@@ -228,7 +229,7 @@ def pending_manual_test(record, row, tables, rows, latest, bot):
         # The parent's invitation already directs its named acceptor to this work.
         executor = person(row, tests['fields'], 'executor', bot)
         if executor and executor != acceptor:
-            return executor, 'verification', '请按这项记录中的标准完成测试，填写实际步骤和结果。'
+            return executor, 'verification', '请照这条记录里的步骤试一次，再写下你做了什么、看到了什么。'
         return None
     number = row.get('number')
     if parent.get('status') != ['已验收'] or not acceptor or not isinstance(number, str) or not number:
@@ -246,8 +247,10 @@ def pending_manual_test(record, row, tables, rows, latest, bot):
         reply = addressed_question(latest[tests['id'], record], bot)
         if not reply or reply[0] != acceptor:
             return None
-    requested = [word for word in ('角色', '时间', '步骤', '结果') if word in row['summary']]
-    return acceptor, 'evidence', '请在测试记录下补充当时试用的' + '、'.join(requested or ['情况']) + '。'
+    details = {'角色': '当时用的是什么身份', '时间': '什么时候试的', '步骤': '做了哪些操作', '结果': '看到了什么结果'}
+    requested = [label for word, label in details.items() if word in row['summary']]
+    follow_up = '写下' + '、'.join(requested) if requested else '写下当时试用的情况'
+    return acceptor, 'evidence', '请补一下试用记录。' + follow_up + '。'
 
 
 def by_recipient(binding, snapshot):
