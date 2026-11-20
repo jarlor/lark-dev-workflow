@@ -250,6 +250,7 @@ def receipt_matches(witness, project, record, intent, marker):
 
 def reconcile(project, business, record, intent):
     reg, anchor = project.rule, intent['head_revision']
+    project.reader.start_read_window()
     history = project.history(record, anchor)
     require(digest(history[-1]) == intent['head_digest'], '提交前的历史版本与保存的依据不同。')
     require(len(history) == 3, '尚未找到请求和紧随其后的唯一状态变化，保留原请求继续核对。')
@@ -274,6 +275,7 @@ def reconcile(project, business, record, intent):
         require(receipt_matches(witness, project, record, intent, marker),
                 '飞书已出现节点变化，但缺少本助手写入这次请求的原始通知。请保留当前事项，不要重发。')
     require(evidence(business, project, record) == intent['business'], '原确认、关联或构建依据已变化。')
+    project.reader.start_read_window()
     project.check_rule()
     require(project.row(record) == (reg['target']['name'], reg['marker_text'])
             and project.history(record)[0] == transition, '读回时状态、标记或版本又有变化。')
@@ -294,6 +296,7 @@ def transact(project, business, record):
                     and pending[0]['rule_digest'] == digest(reg), '该事项还有另一项请求要先核对。')
             intent = pending[0]
         else:
+            project.reader.start_read_window()
             project.check_rule()
             state, marker = project.row(record)
             completed = [x for x in entries if x['key'] == project.key]
@@ -308,6 +311,9 @@ def transact(project, business, record):
             if completed:
                 require(proof['revision'] > completed[-1]['business']['revision'],
                         '这版事项已经推进过。请核对为何又回到了起点。')
+            # Business verification reads the whole linked graph with its own bound.
+            # The row and history below form one new window on the same pinned reader.
+            project.reader.start_read_window()
             head = project.history(record)[0]
             if marker:
                 require(entries and entries[-1]['result']['target'] == state
@@ -321,6 +327,7 @@ def transact(project, business, record):
                                     for c in h['field_changes']) for h in since[:-1]),
                         '上一动作完成后，状态或标记又被改过。')
             require(evidence(business, project, record) == proof, '提交前业务依据发生变化。')
+            project.reader.start_read_window()
             project.check_rule(sending=True)
             require(project.row(record) == (state, marker) and project.history(record)[0] == head,
                     '提交前事项或记录历史发生变化。')
@@ -347,6 +354,8 @@ def _run(config_path, rule_name_or_key, record_id, *, business):
         return transact(Project(config_path, rule_name_or_key), business, record_id)
     except Pending as exc:
         return {'status': 'pending', 'reason': str(exc)}
+    except watch.ScanTimeout:
+        return {'status': 'pending', 'reason': '这次读表超过时限，请用原动作重新核对进度。'}
     except (KeyError, ValueError, AttributeError, TypeError, OSError, subprocess.SubprocessError, OnboardingError):
         return {'status': 'pending', 'reason': '尚未查实本次动作。已保存的请求下次只查结果。'}
 

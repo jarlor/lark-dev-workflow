@@ -6,7 +6,7 @@ from unattended_control import ControlError, load_config
 
 MODE = 'registered_requests'
 # Bump only when a changed stage check can unblock a previous waiting result.
-STAGE_CHECK_REVISION = 3
+STAGE_CHECK_REVISION = 4
 SERVICE = Path(__file__).resolve().parents[3] / 'service'
 
 

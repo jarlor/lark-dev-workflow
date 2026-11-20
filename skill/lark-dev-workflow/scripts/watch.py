@@ -23,6 +23,10 @@ class WatchError(OnboardingError):
     pass
 
 
+class ScanTimeout(WatchError):
+    pass
+
+
 class Cli(comments.Cli):
     """Official CLI reads under the explicitly selected project profile."""
 
@@ -32,18 +36,23 @@ class Cli(comments.Cli):
         if (not isinstance(executable, str) or not executable.strip()
                 or (executable != 'lark-cli' and not Path(executable).is_absolute())):
             raise WatchError('The configured Lark executable must be an absolute path.')
-        deadline = time.monotonic() + scan_timeout
+        self._scan_timeout = scan_timeout
+        self.start_read_window()
 
         def bounded(argv, **kwargs):
-            remaining = deadline - time.monotonic()
+            remaining = self._deadline - time.monotonic()
             if remaining <= 0:
-                raise WatchError('Project scan exceeded its time limit; keep the previous checkpoint.')
+                raise ScanTimeout('Project scan exceeded its time limit; keep the previous checkpoint.')
             kwargs['timeout'] = min(kwargs.get('timeout', 60), 60, remaining)
             # This wrapper also serves the inherited Base/document/comment readers.
             # A resolved npm entrypoint may be named cli.js, so PATH alone cannot pin it.
             return runner([executable, *argv[1:]], **kwargs)
 
         super().__init__(profile, bounded, actor=actor)
+
+    def start_read_window(self):
+        """Start a separately bounded group of reads. A scan uses one window for all its pages."""
+        self._deadline = time.monotonic() + self._scan_timeout
 
     def fields(self, token, table):
         return self.base.pages('+field-list', 'fields', '--base-token', token,

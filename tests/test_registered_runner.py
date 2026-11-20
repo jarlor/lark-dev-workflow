@@ -69,10 +69,10 @@ class RegisteredRunnerTests(RuntimeFixture):
 
     def test_upgrade_revisits_waiting_acceptance_from_previous_release(self):
         self.delay = 3600
-        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 2):
+        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 3):
             self.assertEqual(self.registered_tick()['status'], 'ran')
         original = self.state()
-        self.assertEqual(original['registered_start_check_revision'], 2)
+        self.assertEqual(original['registered_start_check_revision'], 3)
         self.assertGreater(original['next_due_at'], self.timestamp)
         self.assertEqual(self.registered_tick()['status'], 'ran')
         self.assertEqual(self.run_reason(), 'registered_stage_check_updated')

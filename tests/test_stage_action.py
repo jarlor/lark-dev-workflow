@@ -22,6 +22,7 @@ def entry(rev, who, field=None, kind=None, before=None, after=None):
 class Project:
     def __init__(self, directory, key='work-start'):
         self.directory = directory
+        self.reader = mock.Mock(spec=['start_read_window'])
         self.path = '/project/service.json'
         self.table, self.project, self.bot = 'tblWork', 'recProject', 'ou_assistant'
         self.token, self.identity = 'base', 'bound-project'
@@ -130,6 +131,64 @@ class StageActionTests(unittest.TestCase):
         self.project.state = self.project.rule['source']['name']
         self.assertEqual(self.run_action()['status'], 'pending')
         self.assertEqual(len(self.project.sends), 2)
+
+    def test_slow_evidence_does_not_consume_row_read_windows(self):
+        clock = [0]
+        verified = []
+        original = self.business.verify
+        def slow_graph(*args):
+            verified.append(clock[0])
+            clock[0] += 185
+            return original(*args)
+
+        reads = []
+        def run(argv, **kwargs):
+            reads.append(kwargs['timeout'])
+            return subprocess.CompletedProcess(argv, 0, '{"ok":true,"data":{}}', '')
+
+        row, history = self.project.row, self.project.history
+        with mock.patch.object(action.watch.time, 'monotonic', side_effect=lambda: clock[0]):
+            cli = self.project.reader = action.watch.Cli('fixture', run)
+            def read(method):
+                def checked(*args):
+                    cli.base.read('+field-list')
+                    return method(*args)
+                return checked
+            clock[0] += 350  # Callers may also have waited for the row lock.
+            with mock.patch.object(self.business, 'verify', side_effect=slow_graph), \
+                 mock.patch.object(self.project, 'row', side_effect=read(row)), \
+                 mock.patch.object(self.project, 'history', side_effect=read(history)):
+                self.assertEqual(self.run_action()['status'], 'completed')
+        self.assertEqual(len(verified), 3)
+        self.assertEqual(len(self.project.sends), 1)
+        self.assertTrue(reads and all(0 < timeout <= 60 for timeout in reads))
+
+    def test_one_read_phase_still_expires_before_the_marker(self):
+        clock = [0]
+        history = self.project.history
+        with mock.patch.object(action.watch.time, 'monotonic', side_effect=lambda: clock[0]):
+            cli = self.project.reader = action.watch.Cli('fixture', mock.Mock())
+            def late(*args):
+                clock[0] += 301
+                cli.base.read('+field-list')
+                return history(*args)
+            with mock.patch.object(self.project, 'history', side_effect=late):
+                self.assertEqual(self.run_action(), {'status': 'pending', 'reason': '这次读表超过时限，请用原动作重新核对进度。'})
+        self.assertFalse(self.project.sends)
+
+    def test_changed_head_across_evidence_windows_still_stops_before_sending(self):
+        original = self.business.verify
+        reads = []
+        def verify(*args):
+            reads.append(args)
+            if len(reads) == 2:
+                self.project.rows.insert(0, entry(32, '负责人', 'fldNote', 'Text', '', '补充说明'))
+            return original(*args)
+        with mock.patch.object(self.business, 'verify', side_effect=verify):
+            result = self.run_action()
+        self.assertEqual(result['status'], 'pending')
+        self.assertIn('提交前事项或记录历史发生变化', result['reason'])
+        self.assertFalse(self.project.sends)
 
     def test_unknown_initial_marker_and_wrong_stage_never_dispatch(self):
         self.project.marker = '另一事项'

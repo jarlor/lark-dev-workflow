@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.4.3",
+    "skill_version": "2.4.4",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -111,7 +111,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.3",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.4",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -514,22 +514,35 @@
         "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
         "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
       ]
+    },
+    "2.4.3": {
+      "version": "2.4.3",
+      "date": "2026-11-20",
+      "scope": [
+        "Preserve the approved revision when a previously empty acceptance field is filled once with the verified original feedback author who approved the scope.",
+        "Use the same verified human identity for acceptance planning while retaining full checks for any other recipient.",
+        "Allow an explicitly authorized independent isolated retest for the named requirement, its approved plans, the components actually tested, and the matching deployed assets.",
+        "Verify the real test deployment separately and require the manual acceptance plan to stay bound to that deployment. Mandatory hosted tests and Bug retests retain their original conditions.",
+        "The original waiting worker revisits its pending stage once after an upgrade."
+      ],
+      "template_version": "2.0.0",
+      "tests": 554,
+      "environments": [
+        "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
+        "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
+      ]
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.4.3",
+  "release_version": "2.4.4",
   "skill_release_validation": {
-    "version": "2.4.3",
+    "version": "2.4.4",
     "date": "2026-11-20",
     "scope": [
-      "Preserve the approved revision when a previously empty acceptance field is filled once with the verified original feedback author who approved the scope.",
-      "Use the same verified human identity for acceptance planning while retaining full checks for any other recipient.",
-      "Allow an explicitly authorized independent isolated retest for the named requirement, its approved plans, the components actually tested, and the matching deployed assets.",
-      "Verify the real test deployment separately and require the manual acceptance plan to stay bound to that deployment. Mandatory hosted tests and Bug retests retain their original conditions.",
-      "The original waiting worker revisits its pending stage once after an upgrade."
+      "Each stage read has its own bounded time window. Time spent verifying builds and tests does not consume the final read before submission.",
+      "Existing confirmation, independent evidence, current record, workflow, and post-write checks still apply. A waiting project is revisited once on upgrade."
     ],
     "template_version": "2.0.0",
-    "tests": 554,
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
