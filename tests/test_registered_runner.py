@@ -61,21 +61,33 @@ class RegisteredRunnerTests(RuntimeFixture):
         write_json(state_path, legacy)
         self.assertGreater(legacy['next_due_at'], self.timestamp)
         self.assertEqual(self.registered_tick()['status'], 'ran')
-        self.assertEqual(self.run_reason(), 'registered_start_check_updated')
-        self.assertEqual(self.state()['registered_start_check_revision'], runtime.registered_requests.START_CHECK_REVISION)
+        self.assertEqual(self.run_reason(), 'registered_stage_check_updated')
+        self.assertEqual(self.state()['registered_start_check_revision'], runtime.registered_requests.STAGE_CHECK_REVISION)
         self.assertEqual(self.calls[-1]['state']['session_id'], legacy['session_id'])
         self.assertEqual(self.registered_tick()['status'], 'unchanged')
         self.assertEqual(len(self.calls), 2)
 
+    def test_upgrade_revisits_waiting_acceptance_from_previous_release(self):
+        self.delay = 3600
+        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 2):
+            self.assertEqual(self.registered_tick()['status'], 'ran')
+        original = self.state()
+        self.assertEqual(original['registered_start_check_revision'], 2)
+        self.assertGreater(original['next_due_at'], self.timestamp)
+        self.assertEqual(self.registered_tick()['status'], 'ran')
+        self.assertEqual(self.run_reason(), 'registered_stage_check_updated')
+        self.assertEqual(self.calls[-1]['state']['session_id'], original['session_id'])
+        self.assertEqual(self.registered_tick()['status'], 'unchanged')
+
     def test_new_revision_leaves_idle_and_paused_alone_and_preserves_changed_reason(self):
         self.outcome = 'idle'
-        with mock.patch.object(runtime.registered_requests, 'START_CHECK_REVISION', 1):
+        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 1):
             self.assertEqual(self.registered_tick()['status'], 'ran')
         self.assertEqual(self.registered_tick()['status'], 'unchanged')
         self.assertEqual(self.state()['registered_start_check_revision'], 1)
         self.outcome = 'waiting'
         self.snapshot['comments']['new'] = {'revision': 'a new reply'}
-        with mock.patch.object(runtime.registered_requests, 'START_CHECK_REVISION', 1):
+        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 1):
             self.assertEqual(self.registered_tick()['status'], 'ran')
         paused = Path(self.config['state_dir']) / 'PAUSED'
         paused.write_text('人员暂停')
@@ -88,7 +100,7 @@ class RegisteredRunnerTests(RuntimeFixture):
         self.assertEqual(self.registered_tick()['status'], 'unchanged')
 
     def test_failed_upgrade_recheck_keeps_previous_revision_and_recovery(self):
-        with mock.patch.object(runtime.registered_requests, 'START_CHECK_REVISION', 1):
+        with mock.patch.object(runtime.registered_requests, 'STAGE_CHECK_REVISION', 1):
             self.assertEqual(self.registered_tick()['status'], 'ran')
         original = self.state()
         failure = mock.Mock(side_effect=runtime.RunnerError('worker interrupted'))

@@ -20,6 +20,7 @@ import workflow_rule as rules
 
 
 FIRST = {'requirements': 'req-start', 'bugs': 'bug-start', 'work': 'work-start'}
+HUMAN_PROOF_CHECKS = {'current_record_human_transition', 'official_history_profile', 'archived_runner_history'}
 # These downstream facts are produced *after* approval. They are checked by the
 # step's business adapter; changes to them cannot document or extend a human approval.
 LATER = {
@@ -155,6 +156,7 @@ def record_history(project, role, record, seal, row, current_values):
     stage = after
     owner_field = project.fields['owner']['id'] if role == 'work' else None
     previous_owner = None
+    acceptor_field = project.fields['acceptor']['id'] if role in ('requirements', 'bugs') else None
     filed = {}
     note_fields = {project.fields[k]['id']: k for k in ('confirmation', 'confirmed_revision', 'details')
                    if role == 'requirements' and k in project.fields}
@@ -178,6 +180,12 @@ def record_history(project, role, record, seal, row, current_values):
                 require(stage == after and previous_owner is None,
                         '只可核对计划确认后、开工前的一次负责人交接。')
                 previous_owner = authorized_owner_handoff(project, record, row, proof, item)
+            elif fid is not None and fid == acceptor_field:
+                import acceptor_enrollment
+                require(stage in ('可研发', '研发中') and fid not in filed,
+                        '只能在送验前补登一次原反馈人。')
+                acceptor_enrollment.checked_change(project, role, record, row, proof, item)
+                filed[fid] = []
             elif fid in note_fields:
                 import confirmation_notes
                 require(fid not in filed and len(changes) == 1, '确认后的归档字段被多次修改或和其他改动混在一起。')
@@ -413,6 +421,7 @@ class Business:
         self.tables = self.p.binding['tables']
         self.rows, self.live, self.approvals, self.proofs = {}, {}, {}, {}
         self.source_cache = {}
+        self.confirmed_people = {}
 
     def row(self, role, record):
         key = (role, record)
@@ -449,6 +458,12 @@ class Business:
             proof = confirmation_for(self.p.path, role, record)
             require(proof.get('status') == 'verified', proof.get('reason') or '缺少关联事项的真实人工确认。')
             self.approvals[record] = (role, proof['business_revision'], proof['confirmation_sha256'])
+            if (proof.get('check') in HUMAN_PROOF_CHECKS
+                    and proof.get('role') == role and proof.get('record_id') == record
+                    and proof.get('project_record_id') == self.p.project
+                    and proof.get('table_id') == self.tables[role]['id']
+                    and proof.get('field_id') == self.tables[role]['fields']['status']['id']):
+                self.confirmed_people[record] = proof.get('operator_open_id')
         require(self.approvals[record][0] == role, '关联确认的记录角色冲突。')
         return self.approvals[record][1]
 
@@ -611,6 +626,10 @@ class Business:
                         for i in v) and len(v) == len(set(v)) for v in tests.values()),
                 '没有核实本版需要哪些真实测试记录。')
         self.proofs[('target', role, record)] = [t['components'], t['environment'], t['build'], tests]
+        if 'isolated_independent' in t:
+            import isolated_retest
+            isolated_retest.validate_target(t, self.key, role, ready)
+            self.proofs[('isolated_policy', record)] = digest(t['isolated_independent'])
         return t
 
     def timestamp(self, test, row):
@@ -627,9 +646,10 @@ class Business:
                 and type(when) is int and when > 0, '测试记录缺少可核实的实际执行时间。')
         return when
 
-    def test(self, rid, purpose, result, target, subjects):
+    def test(self, rid, purpose, result, target, subjects, *, isolated=False):
         row = self.row('verification', rid)
         p = self.source('test', 'verification', rid)
+        require(('isolated_execution' in p) == isolated, '此项检查的执行环境与项目对这条记录的约定不符。')
         purposes = (purpose,) if isinstance(purpose, str) else purpose
         require(labels(row, 'purpose') in purposes and row['result'] == [result] and p.get('result') == result
                 and row['purpose'] == [p.get('purpose')] and row['method'] == [p.get('method')]
@@ -708,9 +728,11 @@ class Business:
         plan = self.source('acceptance_plan', 'verification', test)
         subject = 'requirements' if role == 'requirements' else 'retested_bugs'
         require(len(verifier) == 1 and verifier[0] != self.p.bot, '还没有唯一的真人验收人。')
-        confirmation.confirm_directory_user(self.p.reader, verifier[0])
+        revision = self.approved(role, record)
+        if ids(parent.get('confirmer')) != verifier or self.confirmed_people.get(record) != verifier[0]:
+            confirmation.confirm_directory_user(self.p.reader, verifier[0])
         require(plan.get('acceptor') == verifier[0]
-                and plan.get('subject_id') == record and plan.get('revision') == self.approved(role, record)
+                and plan.get('subject_id') == record and plan.get('revision') == revision
                 and plan.get('key') == row['key'] and plan.get('criteria_sha256') == digest(row.get('criteria_snapshot'))
                 and confirmation.inline_text(row.get('criteria_snapshot')) and row['purpose'] == [
                     '需求验收' if role == 'requirements' else 'Bug复测'] and row['result'] == ['未执行']
@@ -768,7 +790,17 @@ class Business:
                 require(work_links and set(work_links) <= set(works), '复测或集成记录缺少适用研发项的真实关联。')
                 subjects = {(role, record): test_subject, **{('work', w): 'work' for w in work_links}}
                 purposes = ('Bug复测',) if role == 'bugs' else ('需求验收', '交付验证')
-                result = self.test(test, purposes, '通过', target, subjects)
+                test_target = target
+                isolated = group == 'independent' and test in target.get('isolated_independent', {})
+                if isolated:
+                    import isolated_retest
+                    evidence = self.source('test', 'verification', test)
+                    test_target = isolated_retest.test_target(target, test, evidence,
+                        {w: self.row('work', w).get('plan') for w in work_links},
+                        {rid: self.approved(r, rid) for r, rid in subjects},
+                        [d for w in work_links for d in developers[w]])
+                    self.proofs[('isolated_execution', test)] = digest(evidence['isolated_execution'])
+                result = self.test(test, purposes, '通过', test_target, subjects, isolated=isolated)
                 if group == 'independent':
                     require(all(result['executor_id'] != d['executor_id'] and result['session_id'] != d['session_id']
                                 and result['started_ms'] >= d['ended_ms'] for w in work_links for d in developers[w]),

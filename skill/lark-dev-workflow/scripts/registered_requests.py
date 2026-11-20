@@ -5,8 +5,8 @@ import sys
 from unattended_control import ControlError, load_config
 
 MODE = 'registered_requests'
-# Revision 2 can validate an authorized owner handoff after the original plan approval.
-START_CHECK_REVISION = 2
+# Bump only when a changed stage check can unblock a previous waiting result.
+STAGE_CHECK_REVISION = 3
 SERVICE = Path(__file__).resolve().parents[3] / 'service'
 
 

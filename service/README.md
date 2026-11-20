@@ -142,6 +142,16 @@ python3 service/verify_confirmation.py --config "$bridge_config" \
 | `work-start` | 研发项开始执行 | 可开始 → 进行中 | 研发计划、工作范围、约定交付物、验证方式 |
 | `work-deliver` | 研发项交付 | 进行中 → 已交付 | 交付与进展 |
 
+需求或 Bug 当初确认范围时没填验收人，送验前可以这样查。运行 `python3 service/acceptor_enrollment.py --config "$bridge_config" --role requirements --record-id "$record_id"`，Bug 用 `--role bugs`。工具只读飞书，会逐条核对关联反馈，确认每条反馈都是原范围确认人亲自提交的。
+
+- `ready_to_fill` 表示可以补登。由项目唯一的执行器在写入前重查记录版本和空栏，只填写返回的验收人，再读回核对。
+- `already_assigned` 表示这位验收人已经填好。上次写入没收到回执时，用原参数核对这行和修改历史。结果仍不清楚就先等待，避免重复写入。
+- `pending` 会说明哪里还没核实。有人代录、出现多位反馈人、原范围变了或已有其他验收人时，先保留原记录。
+
+补登只确定由谁验收。验收人按约定检查并点「已验收」后，人工验收才完成。
+
+需求原计划明确允许用隔离数据复测时，可逐条登记这项独立测试。登记依据包括已确认的计划、本地实际测过的代码、测试服部署版本，以及两边实际运行的制品。人工验收另建「未执行」记录，等验收人在约定的测试环境试用。要求在测试服完成的集成检查和 Bug 复测继续使用原环境。
+
 登记项沿用上面的工作流、表和字段编号，另外填写 `key`、工作流的 `title`、`table_name`、`marker_text`，并把提交请求的助手 open_id 填入 `authored_by`。`guard` 使用 `project_link` 并固定本项目的记录编号。可选的 `project_filter_mode` 只接受 `trigger_project_id`。
 
 `nature_field_id` 和 `processing_field_id` 分别指向记录性质和处理情况，`nature_option` 和 `processing_option` 分别填写「当前工作」和「正常」的真实 `id`、`name`。`source` 和 `target` 填写该副本实际核实的节点编号和名称，`required_field_ids` 填上表对应的本表字段编号。研发项使用 `owner_match=bound_assistant` 和单人负责人字段。需求和 Bug 使用 `owner_match=none`、`owner_field_id=null`。
@@ -167,6 +177,8 @@ python3 service/stage_action.py --config "$bridge_config" --action work-start --
 返回 `completed` 表示已从这行的飞书历史核实节点推进。`already_completed` 表示同一个动作之前已经完成。返回 `pending` 时先看原因。上一次写请求没有收到应答时，用原参数重查。服务会把飞书发来的助手写入通知与本行历史逐项核对。若当时没收到这条通知，事项保持待核实，请勿重发同一请求。工具只为分给这个助手的研发项开工或交付。需求和 Bug 送验前，还会核对关联研发项、同一构建的测试结果和留给人的验收记录。
 
 测试结果来自项目已有的运行报告、制品或部署检查。服务管理员把本项目的 `read_evidence.py` 和 `registration.json` 安装在服务配置同级的 `stage-proof-source/` 中。登记读取器的 SHA256、允许读取的证据目录以及本服务和执行器的标识。读取器由管理员维护，服务账号只需读权限。接口定义见 [stage_source.py](stage_source.py)，业务核对见 [stage_business.py](stage_business.py)。接入时用本项目实际产生的报告验证。某一项缺少测试或部署材料时，助手会在那一步等待。范围确认、计划确认和最后验收继续由指定的人在事项里点「完成节点」。
+
+如果已确认的研发计划明确允许隔离复测，项目可为这条需求的指定测试记录登记该约定。助手会核对原计划、实际测试的代码版本、测试人员和执行时间，并逐个比对本地与测试服的制品。测试服还须通过部署与健康检查。要求在测试服运行的集成检查仍须在那里完成，最终由指定验收人在测试服验收。Bug 修复后复测沿用项目原有的环境要求。 证据读取器应把从固定构建和测试服分别取得的文件放入同一目录下的 `local/` 和 `deployed/`，使用相同文件名，同时登记原始比对报告。
 
 人已经确认计划、研发项还在「可开始」时，如果项目明确授权把这条事项交给研发助手，可以保留原确认。项目的证据读取器通过 `owner_handoff` 提供针对这条事项的授权，以及飞书单独修改负责人后的操作回执。读取器须核实改前和改后都只有一位负责人，并核实原负责人和助手的飞书 ID。服务会对照这次变更的飞书历史、项目、计划版本和原确认人。无法核实时，事项保持等待。
 

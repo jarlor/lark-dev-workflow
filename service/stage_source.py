@@ -43,7 +43,7 @@ def admin_path(path, directory=False):
             '项目证据读取器须由服务器管理员安装，项目不能改写它。')
 
 
-def response_sources(sources, roots):
+def response_sources(sources, roots, *, identities=None):
     require(isinstance(sources, list) and 0 < len(sources) <= 32, '没有本次实际运行的原始材料。')
     checked = {}
     for source in sources:
@@ -64,6 +64,8 @@ def response_sources(sources, roots):
                     (final.st_dev, final.st_ino, final.st_mtime_ns, final.st_size),
                     '原始执行材料已变化。')
         checked[str(path)] = observed
+        if identities is not None:
+            identities[str(path)] = (initial.st_dev, initial.st_ino)
     return checked
 
 
@@ -123,7 +125,9 @@ def query(project, kind, role, record, *, prior_step=None):
     require(isinstance(data, dict) and set(data) == {'request', 'evidence', 'sources'}
             and data['request'] == request and isinstance(data['evidence'], dict),
             '项目尚未提供这一动作、记录和版本的实际材料。')
-    hashes = set(response_sources(data['sources'], roots).values())
+    identities = {}
+    files = response_sources(data['sources'], roots, identities=identities)
+    hashes = set(files.values())
     evidence = data['evidence']
     if kind in ('test', 'acceptance_plan', 'original_click', 'prior_action'):
         require(evidence.get('report_sha256') in hashes, '没有查到与本次原始报告摘要相同的文件。')
@@ -140,4 +144,7 @@ def query(project, kind, role, record, *, prior_step=None):
         builds = evidence.get('components')
         evidence['verified_artifact'] = (isinstance(builds, dict) and bool(builds) and
                                          all(isinstance(value, str) and value in hashes for value in builds.values()))
+    if 'isolated_independent' in evidence or 'isolated_execution' in evidence:
+        import isolated_retest
+        isolated_retest.check_sources(kind, role, project.key, evidence, files, identities)
     return evidence
