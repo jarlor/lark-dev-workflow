@@ -2,7 +2,7 @@
 name: lark-dev-workflow
 description: "用飞书多维表格处理项目反馈、需求、Bug、验收和交接。支持模板副本接入，以及在 Linux 上由飞书事件或定时任务唤醒 Codex CLI。通过项目配置适配已有表格。"
 metadata:
-  version: "2.4.4"
+  version: "2.5.0"
 ---
 
 # 飞书研发工作流
@@ -28,7 +28,7 @@ metadata:
 | 处理评论中的补充、决定或追问 | [评论处理](references/comments.md)：读取完整线程、核实项目与已有处理；涉及业务状态时同时应用业务流程 |
 | 接手或转交工作 | [多人接手](references/collaboration.md)：核对负责人、分配依据和未结束的操作 |
 | 用本人已登录的飞书网页接入 | [本人网页接入](references/browser-access.md)：复用本机浏览器，核实账号和已有 Base；不因缺少 CLI profile 自动创建应用 |
-| 让飞书记录或评论唤醒 Linux 上的 Codex | 按[独立助手接入](references/assistant-identity.md)绑定账号，从同版完整包安装长连接服务。收通知和定时补查由这个服务统一负责 |
+| 让飞书事件唤醒 Linux 上的 Codex，或给负责人定时汇总待办 | 按[独立助手接入](references/assistant-identity.md)绑定账号，从同版完整包安装长连接服务。收通知和定时补查由这个服务统一负责 |
 | 使用原来的 Linux 定时任务 | [使用 crontab](references/unattended.md)。仅在项目选择这种方式时安装 |
 | 已由 Linux 启动一轮工作 | 按[本轮工作规则](references/unattended-worker.md)处理事项、返回结果，沿用当前调度方式 |
 

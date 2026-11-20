@@ -183,6 +183,43 @@ class EventBridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             bridge.config_from(self.config_path)
 
+    def test_digest_is_opt_in_and_dispatch_only(self):
+        self.assertFalse(bridge.config_from(self.config_path).get('human_digest'))
+        self.config_path.write_text(json.dumps(dict(self.config, human_digest=True)))
+        with self.assertRaises(ValueError):
+            bridge.config_from(self.config_path)
+        self.set_dispatch()
+        for value in (True, 'yes'):
+            self.config_path.write_text(json.dumps(dict(self.config, human_digest=value)))
+            if value is True:
+                self.assertTrue(bridge.config_from(self.config_path)['human_digest'])
+            else:
+                with self.assertRaises(ValueError):
+                    bridge.config_from(self.config_path)
+
+    def test_digest_does_not_overlap_and_retries_only_unsettled_slots(self):
+        schedule = bridge.DigestSchedule(self.config_path, self.config, (str(self.root),))
+        with mock.patch.object(bridge.subprocess, 'Popen') as start:
+            child = start.return_value
+            child.poll.return_value = None
+            schedule.poll(1798, 10)
+            schedule.poll(1800, 12)
+            self.assertEqual(start.call_count, 1)
+            child.poll.return_value = 0
+            schedule.poll(1801, 13)
+            self.assertEqual(start.call_count, 2)
+            child.poll.return_value = 1
+            schedule.poll(1802, 14)
+            schedule.poll(1840, 52)
+            self.assertEqual(start.call_count, 2)
+            schedule.poll(2102, 314)
+            child.poll.return_value = 0
+            schedule.poll(2103, 315)
+            schedule.poll(3599, 1811)
+            self.assertEqual(start.call_count, 3)
+            schedule.poll(3600, 1812)
+            self.assertEqual(start.call_count, 4)
+
     def test_existing_service_state_cannot_change_worker_checkout_after_restart(self):
         self.set_dispatch()
         bridge.Journal(self.config)

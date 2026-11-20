@@ -166,6 +166,11 @@ class PlanNoticeTests(unittest.TestCase):
                     self.assertEqual(check()['status'], 'pending')
         self.assertEqual((self.previews, self.sends), (0, 0))
 
+    def test_digest_replaces_the_single_plan_notification(self):
+        self.project.config['human_digest'] = True
+        self.assertEqual(self.invoke()['status'], 'scheduled_digest')
+        self.assertEqual((self.sends, self.previews), (0, 0))
+
     def test_wrong_or_stale_scope_and_same_second_never_send(self):
         for mutate in (lambda s: s.update(signature='other'),
                        lambda s: s.update(started_at=self.now-100000, observed_at=self.now-90000),

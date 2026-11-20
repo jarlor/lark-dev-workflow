@@ -47,7 +47,7 @@ def nonempty(value):
 def config_from(path):
     config = load(path)
     required = set(PINS) | {'table_ids', 'state_dir'}
-    allowed = required | set(TIMERS) | {'mode', 'runner_config', 'tick_argv'}
+    allowed = required | set(TIMERS) | {'mode', 'runner_config', 'tick_argv', 'human_digest', 'human_digest_minutes'}
     if not isinstance(config, dict) or not required <= config.keys() <= allowed:
         raise ValueError('Invalid service config keys.')
     if not all(nonempty(config[key]) for key in PINS) or not absolute(config['state_dir']):
@@ -60,6 +60,12 @@ def config_from(path):
     config.setdefault('mode', 'observe')
     if config['mode'] not in ('observe', 'dispatch'):
         raise ValueError('mode must be observe or dispatch.')
+    digest = config.get('human_digest', False)
+    if type(digest) is not bool or (digest and config['mode'] != 'dispatch'):
+        raise ValueError('human_digest requires a boolean and an active dispatch service.')
+    minutes = config.get('human_digest_minutes', 30)
+    if type(minutes) is not int or minutes not in (5, 10, 30):
+        raise ValueError('human_digest_minutes must be 5, 10 or 30.')
     for key, (default, minimum, maximum) in TIMERS.items():
         value = config.setdefault(key, default)
         if type(value) is not int or not minimum <= value <= maximum:
@@ -556,6 +562,8 @@ def worker_environment():
 
 
 def retry_after_tick(path, config, paths, status, listener):
+    if config.get('human_digest'):
+        return None
     if status not in ('ran', 'unchanged') or listener is None or listener.poll() is not None:
         return None
     try:
@@ -570,6 +578,43 @@ def retry_after_tick(path, config, paths, status, listener):
         return None
 
 
+class DigestSchedule:
+    """Run at startup and at the configured time boundaries independently of the project tick."""
+
+    def __init__(self, path, config, paths):
+        self.command = [sys.executable, str(Path(__file__).with_name('human_digest.py')),
+                        '--config', str(path), '--pin', deferred_notices.binding_pin(config, paths)]
+        self.workdir = paths[0]
+        self.interval = config.get('human_digest_minutes', 30) * 60
+        self.process = None
+        self.slot = None
+        self.retry_at = 0
+
+    def poll(self, wall_time, monotonic):
+        if self.process is not None:
+            result = self.process.poll()
+            if result is None:
+                return
+            self.process = None
+            if result:
+                self.retry_at = monotonic + 300
+                print('Human digest incomplete; retry in five minutes.', file=sys.stderr, flush=True)
+        slot = int(wall_time) // self.interval
+        if self.slot == slot and (not self.retry_at or monotonic < self.retry_at):
+            return
+        self.slot, self.retry_at = slot, 0
+        try:
+            self.process = subprocess.Popen(self.command, cwd=self.workdir, env=worker_environment(),
+                                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        except OSError:
+            self.retry_at = monotonic + 300
+            print('Human digest failed to start; retry in five minutes.', file=sys.stderr, flush=True)
+
+    def stop(self):
+        if self.process is not None:
+            self.process.wait()
+
+
 def supervise(path, config, journal):
     stop = False
     def request_stop(*_):
@@ -579,6 +624,7 @@ def supervise(path, config, journal):
         signal.signal(sig, request_stop)
     expected = runner_pins(config) if config['mode'] == 'dispatch' else None
     schedule = Schedule(config)
+    digest = DigestSchedule(path, config, expected) if config.get('human_digest') else None
     listener, worker, output, reminder = None, None, None, None
     next_socket = 0
     with contextlib.ExitStack() as locks:
@@ -592,6 +638,8 @@ def supervise(path, config, journal):
         try:
             while not stop:
                 now = time.monotonic()
+                if digest:
+                    digest.poll(time.time(), now)
                 if listener and listener.poll() is not None:
                     print('Feishu receiver exited; will reconnect. Reconciliation remains active.', file=sys.stderr, flush=True)
                     listener = None
@@ -633,6 +681,8 @@ def supervise(path, config, journal):
                             print('Failed to start the configured tick; will retry.', file=sys.stderr, flush=True)
                 time.sleep(1)
         finally:
+            if digest:
+                digest.stop()
             if reminder:
                 reminder.wait()
             if listener and listener.poll() is None:

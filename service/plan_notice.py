@@ -164,6 +164,9 @@ def notify(project, record, person, revision, *, expected_request=None):
                and prepared.get('confirmer') == person and prepared.get('plan_revision') == revision
                and all(work[k] == prepared['values'][k] and plan.confirmation.inline_text(work[k]) for k in plan.TEXT),
                '这条记录还没有与当前计划内容一致的准备完成回执。')
+    if project.config.get('human_digest'):
+        return {'status': 'scheduled_digest', 'record_id': record, 'plan_revision': revision,
+                'reason': '计划已写好，下一份个人待办会列出仍需确认的计划。'}
     plan.confirmation.confirm_directory_user(project.reader, person)
     view = fixed_view(project)
     table = project.tables['work']['id']
@@ -263,7 +266,8 @@ def check_before_invite(path, role, record):
         require_capture_ready(project, role, record)
         plan.check(project.row(role, record) == row, '检查期间事项有变化，请重新核对。')
         project.unchanged()
-        result.update(status='ready_to_invite', confirmer=people[0], revision=row[revision])
+        status = 'scheduled_digest' if project.config.get('human_digest') else 'ready_to_invite'
+        result.update(status=status, confirmer=people[0], revision=row[revision])
     except (plan.Conflict, plan.confirmation.Pending) as exc:
         result['reason'] = str(exc)
     except (OSError, ValueError, TypeError, KeyError, IndexError, AttributeError, subprocess.SubprocessError,
@@ -291,7 +295,7 @@ def main():
             parser.error('发送计划提醒时，需要 --work、--confirmer 和 --revision。')
         result = run(args.config, args.work, args.confirmer, args.revision)
     print(json.dumps(result, ensure_ascii=False))
-    return 0 if result['status'] in ('notified', 'ready_to_invite') else 1
+    return 0 if result['status'] in ('notified', 'ready_to_invite', 'scheduled_digest') else 1
 
 
 if __name__ == '__main__':

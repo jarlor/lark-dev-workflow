@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.4.4",
+    "skill_version": "2.5.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -67,7 +67,16 @@
         "scheduler": "single_service_reuses_project_tick",
         "native_stage_mode_prepare": "feedback_plans_and_confirmation_checks_only",
         "native_stage_mode_registered_requests": "six_pinned_actions_require_actual_human_and_execution_evidence",
-        "file_subscription": "assistant_file_manager_or_one_time_authorized_user"
+        "file_subscription": "assistant_file_manager_or_one_time_authorized_user",
+        "human_digest": {
+          "default": false,
+          "interval_minutes": [
+            5,
+            10,
+            30
+          ],
+          "default_interval_minutes": 30
+        }
       }
     },
     "template_versions_read": [
@@ -99,7 +108,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 557,
+  "automated_tests_passed": 581,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -111,7 +120,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.4.4",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.0",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -531,24 +540,42 @@
         "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
         "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
       ]
+    },
+    "2.4.4": {
+      "version": "2.4.4",
+      "date": "2026-11-20",
+      "scope": [
+        "Each stage read has its own bounded time window. Time spent verifying builds and tests does not consume the final read before submission.",
+        "Existing confirmation, independent evidence, current record, workflow, and post-write checks still apply. A waiting project is revisited once on upgrade.",
+        "Document seven workflow responsibilities, their decision points, communication on the original item, and the optional release responsibility."
+      ],
+      "template_version": "2.0.0",
+      "environments": [
+        "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
+        "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
+      ],
+      "tests": 557
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.4.4",
+  "release_version": "2.5.0",
   "skill_release_validation": {
-    "version": "2.4.4",
+    "version": "2.5.0",
     "date": "2026-11-20",
-    "scope": [
-      "Each stage read has its own bounded time window. Time spent verifying builds and tests does not consume the final read before submission.",
-      "Existing confirmation, independent evidence, current record, workflow, and post-write checks still apply. A waiting project is revisited once on upgrade.",
-      "Document seven workflow responsibilities, their decision points, communication on the original item, and the optional release responsibility."
-    ],
     "template_version": "2.0.0",
+    "scope": [
+      "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
+      "The dedicated assistant uses its existing scheduler. The configurable digest interval is 5, 10, or 30 minutes, defaulting to 30."
+    ],
+    "status": "test_preview_verified_awaiting_human_acceptance",
+    "observations": [
+      "A one-off Linux preview against an isolated same-tenant test copy at a five-minute interval prepared one direct message for one directory-verified recipient."
+    ],
+    "tests": 581,
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
-    ],
-    "tests": 557
+    ]
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

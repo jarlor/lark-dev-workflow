@@ -25,6 +25,8 @@ def run(config, requirement, revision, confirmer, *, draft=None, reconcile=False
 
     record, plan_revision = plan['record_id'], plan['plan_revision']
     notice = plan_notice.run(config, record, confirmer, plan_revision)
+    if notice['status'] == 'scheduled_digest':
+        return dict(notice, status='prepared', notice='scheduled_digest')
     if notice['status'] == 'notified':
         return {'status': 'prepared', 'notice': 'notified', 'record_id': record, 'plan_revision': plan_revision,
                 'comment_id': notice['comment_id'], 'reply_id': notice['reply_id'],
