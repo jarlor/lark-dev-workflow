@@ -112,7 +112,16 @@ class Project:
                                                      comments_state_path=Path(directory) / 'comments.json',
                                                      inspect_native_stages=inspect)
         self.unchanged()
-        return human_actions.by_recipient(self.binding, snapshot), age
+        groups = human_actions.by_recipient(self.binding, snapshot)
+        # A development item is executed by the bound assistant. Human digest
+        # recipients only need approval, clarification, or acceptance actions.
+        # This also drops an old cached "请按计划开发" action if ownership was
+        # changed to the assistant after that snapshot was made.
+        for person, items in list(groups.items()):
+            items[:] = [item for item in items if not (item['role'] == 'work' and item['kind'] == 'work')]
+            if not items:
+                del groups[person]
+        return groups, age
 
     def command(self, args, purpose, *, preview=False):
         result = self.reader.runner(['lark-cli', *args, '--as', 'bot', '--profile', self.actor['profile']],
@@ -347,6 +356,12 @@ def deliver(project, groups, slot, ledger, *, preview=False, clock=time.time, de
               '本次读取已超过发送时间，请按当前事项重新核对。')
 
     for person, items in sorted(groups.items()):
+        # A stale scan can still contain an old human owner after the item was
+        # handed to the assistant.  Ordinary execution is the assistant's job,
+        # so it must never become a human digest entry.  Keep the guard here as
+        # well as in the live action builder because cached snapshots are valid
+        # only for the table read, not for a changed assignment.
+        items = [item for item in items if item.get('kind') != 'work']
         if not items:
             continue
         route = (service, slot, person)

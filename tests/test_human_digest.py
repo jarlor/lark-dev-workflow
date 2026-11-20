@@ -72,6 +72,11 @@ class DigestTests(unittest.TestCase):
         finally:
             db.close()
 
+    def test_development_execution_actions_are_never_sent_to_humans(self):
+        self.groups = {'ou_a': [dict(action(1), kind='work', role='work')]}
+        self.assertEqual(self.send()['messages'], 0)
+        self.assertEqual(self.calls, [])
+
     def test_recipient_privacy_and_receipts_survive_restart(self):
         self.assertEqual(self.send()['messages'], 2)
         self.assertEqual(len(self.calls), 2)
@@ -115,6 +120,16 @@ class DigestTests(unittest.TestCase):
         self.assertEqual(len(result['errors']), 2)
         self.assertIn('41050', result['errors'][0]['reason'])
         self.assertEqual(self.calls[0][0], 'ou_b')
+
+    def test_ordinary_execution_is_never_sent_as_a_human_digest_item(self):
+        # This is the stale-snapshot case: an old read may still say that a
+        # person owns the work after the live record was handed to the assistant.
+        self.groups = {'ou_a': [dict(action(1), kind='work',
+                                     action='请按计划开工。开始后，在这条记录里写下进展。')]}
+        report = self.send(preview=True)
+        self.assertEqual(report['messages'], 0)
+        self.assertEqual(report['recipients'], [])
+        self.assertEqual(self.calls, [])
 
     def test_changed_binding_during_preview_or_slot_change_suppresses_post(self):
         self.project.unchanged.side_effect = digest.DigestError('绑定已变')
