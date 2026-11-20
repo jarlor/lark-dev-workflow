@@ -99,7 +99,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 554,
+  "automated_tests_passed": 557,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -540,13 +540,15 @@
     "date": "2026-11-20",
     "scope": [
       "Each stage read has its own bounded time window. Time spent verifying builds and tests does not consume the final read before submission.",
-      "Existing confirmation, independent evidence, current record, workflow, and post-write checks still apply. A waiting project is revisited once on upgrade."
+      "Existing confirmation, independent evidence, current record, workflow, and post-write checks still apply. A waiting project is revisited once on upgrade.",
+      "Document seven workflow responsibilities, their decision points, communication on the original item, and the optional release responsibility."
     ],
     "template_version": "2.0.0",
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
-    ]
+    ],
+    "tests": 557
   },
   "source_at_packaging": {
     "template_version": "2.0.0",
