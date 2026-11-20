@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.5.0",
+    "skill_version": "2.5.1",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -112,7 +112,7 @@
     "context_change_reporting_and_timestamp_dedup",
     "verified_user_claim_start_block_complete_retains_owner"
   ],
-  "automated_tests_passed": 581,
+  "automated_tests_passed": 588,
   "source_form_enabled": false,
   "not_validated": [
     "real_product_bug_fix_failed_retest_then_pass",
@@ -124,7 +124,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.0",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.1",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -562,9 +562,9 @@
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.5.0",
+  "release_version": "2.5.1",
   "skill_release_validation": {
-    "version": "2.5.0",
+    "version": "2.5.1",
     "date": "2026-11-20",
     "template_version": "2.0.0",
     "scope": [
@@ -573,9 +573,9 @@
     ],
     "status": "test_preview_verified_awaiting_human_acceptance",
     "observations": [
-      "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records."
+      "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records. The send path now drops ordinary AI-owned development actions from human digests, including stale cached observations."
     ],
-    "tests": 586,
+    "tests": 588,
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
