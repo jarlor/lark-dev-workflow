@@ -92,10 +92,10 @@ def main():
     os.umask(0o077)
     try:
         status = retry_one(args.config, args.pin)
-        print('计划提醒：' + status, file=sys.stderr)
+        print('Plan reminder: ' + status, file=sys.stderr)
         return 0
     except (OSError, KeyError, ValueError, TypeError, AttributeError, IndexError):
-        print('无法核对计划提醒，原请求已保留。', file=sys.stderr)
+        print('Could not verify the plan reminder. The original request is preserved.', file=sys.stderr)
         return 1
 
 

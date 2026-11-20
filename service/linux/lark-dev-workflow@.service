@@ -1,5 +1,5 @@
 [Unit]
-Description=飞书项目通知与事项处理 (%i)
+Description=Feishu project notifications and item processing (%i)
 Wants=network-online.target
 After=network-online.target
 

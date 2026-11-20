@@ -570,7 +570,7 @@
     "scope": [
       "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
       "The dedicated assistant uses its existing scheduler. Digests default to hourly at the top of the hour from 09:00 to 21:00 Beijing time. Each morning starts with the current outstanding actions.",
-      "Service journal messages are written in plain Chinese so an operator can understand checks, retries, pauses, and failures without internal status codes."
+      "Service journal messages are written in plain English so an operator can understand checks, retries, pauses, and failures without internal status codes."
     ],
     "status": "test_preview_verified_awaiting_human_acceptance",
     "observations": [

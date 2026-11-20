@@ -252,13 +252,13 @@ class EventBridgeTests(unittest.TestCase):
 
     def test_tick_messages_are_clear_for_service_watchers(self):
         expected = {
-            'ran': '项目检查：已完成一轮处理。',
-            'unchanged': '项目检查：没有新的事项。',
-            'busy': '项目检查：上一轮还在处理，暂不重复启动。',
-            'paused': '项目检查：当前已暂停，没有执行操作。',
-            'recovery_required': '项目检查：需要先恢复上次未完成的工作。',
-            'failed': '项目检查失败：本轮没有完成，稍后会重试。',
-            'unknown': '项目检查：结果无法确认，请查看前后几行日志。',
+            'ran': 'Project check: completed one pass.',
+            'unchanged': 'Project check: no new items.',
+            'busy': 'Project check: the previous run is still active; skipping a duplicate.',
+            'paused': 'Project check: paused; no action taken.',
+            'recovery_required': 'Project check: resume unfinished work before continuing.',
+            'failed': 'Project check failed: this run did not finish; will retry.',
+            'unknown': 'Project check: result unclear; inspect nearby log lines.',
         }
         for status, message in expected.items():
             with self.subTest(status=status):

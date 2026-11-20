@@ -560,15 +560,15 @@ def tick_status(stream, returncode):
 def tick_message(status):
     """Return a short journal message for the person watching the service."""
     messages = {
-        'ran': '项目检查：已完成一轮处理。',
-        'unchanged': '项目检查：没有新的事项。',
-        'busy': '项目检查：上一轮还在处理，暂不重复启动。',
-        'paused': '项目检查：当前已暂停，没有执行操作。',
-        'recovery_required': '项目检查：需要先恢复上次未完成的工作。',
-        'failed': '项目检查失败：本轮没有完成，稍后会重试。',
-        'unknown': '项目检查：结果无法确认，请查看前后几行日志。',
+        'ran': 'Project check: completed one pass.',
+        'unchanged': 'Project check: no new items.',
+        'busy': 'Project check: the previous run is still active; skipping a duplicate.',
+        'paused': 'Project check: paused; no action taken.',
+        'recovery_required': 'Project check: resume unfinished work before continuing.',
+        'failed': 'Project check failed: this run did not finish; will retry.',
+        'unknown': 'Project check: result unclear; inspect nearby log lines.',
     }
-    return messages.get(status, '项目检查：结果无法确认，请查看前后几行日志。')
+    return messages.get(status, 'Project check: result unclear; inspect nearby log lines.')
 
 
 def worker_environment():
@@ -597,7 +597,7 @@ def retry_after_tick(path, config, paths, status, listener):
                                 cwd=paths[0], env=worker_environment(), stdin=subprocess.DEVNULL,
                                 stdout=subprocess.DEVNULL)
     except (OSError, ValueError):
-        print('计划提醒没有启动，原请求已保留，稍后会重试。', file=sys.stderr, flush=True)
+        print('Plan reminder did not start; the original request is preserved and will be retried.', file=sys.stderr, flush=True)
         return None
 
 
@@ -621,7 +621,7 @@ class DigestSchedule:
             self.process = None
             if result:
                 self.retry_at = monotonic + 300
-                print('待办汇总没有完成，5 分钟后会重试。', file=sys.stderr, flush=True)
+                print('Human digest did not finish; retrying in five minutes.', file=sys.stderr, flush=True)
         slot, offset = divmod(int(wall_time), self.interval)
         if not digest_window_open(wall_time) or (self.slot is None and offset >= 60):
             self.slot, self.retry_at = slot, 0
@@ -634,7 +634,7 @@ class DigestSchedule:
                                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
         except OSError:
             self.retry_at = monotonic + 300
-            print('待办汇总没有启动，5 分钟后会重试。', file=sys.stderr, flush=True)
+            print('Human digest did not start; retrying in five minutes.', file=sys.stderr, flush=True)
 
     def stop(self):
         if self.process is not None:
@@ -667,7 +667,7 @@ def supervise(path, config, journal):
                 if digest:
                     digest.poll(time.time(), now)
                 if listener and listener.poll() is not None:
-                    print('飞书连接已断开，准备重新连接。定期检查仍会继续。', file=sys.stderr, flush=True)
+                    print('Feishu connection closed; reconnecting. Scheduled checks will continue.', file=sys.stderr, flush=True)
                     listener = None
                     next_socket = now + config['retry_seconds']
                 if listener is None and now >= next_socket:
@@ -704,7 +704,7 @@ def supervise(path, config, journal):
                             output = None
                             journal.finish(captured, 'failed_to_start')
                             schedule.finished('failed', now)
-                            print('本轮处理没有启动，稍后会重试。', file=sys.stderr, flush=True)
+                            print('This project check did not start; will retry.', file=sys.stderr, flush=True)
                 time.sleep(1)
         finally:
             if digest:
@@ -744,7 +744,7 @@ def main():
         path = args.config.resolve()
         config = config_from(path)
         if args.command == 'check':
-            print('服务检查通过：配置有效。网络连接会在服务运行时建立。')
+            print('Service check passed: configuration is valid. Network connection starts when the service runs.')
             return 0
         journal = Journal(config)
         if args.command == 'status':
@@ -762,7 +762,7 @@ def main():
         return 0
     except (OSError, ImportError, KeyError, ValueError, TypeError, sqlite3.Error) as exc:
         # Includes SDK credential errors. No event payload, subprocess output or secret enters the journal.
-        print(f'服务操作“{args.command}”失败（{type(exc).__name__}）。请检查配置、权限和依赖。',
+        print(f'Service command "{args.command}" failed ({type(exc).__name__}). Check config, permissions, and dependencies.',
               file=sys.stderr)
         return 1
 
