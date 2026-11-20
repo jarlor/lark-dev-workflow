@@ -92,10 +92,10 @@ def main():
     os.umask(0o077)
     try:
         status = retry_one(args.config, args.pin)
-        print('Deferred plan reminder: ' + status, file=sys.stderr)
+        print('计划提醒：' + status, file=sys.stderr)
         return 0
     except (OSError, KeyError, ValueError, TypeError, AttributeError, IndexError):
-        print('Could not verify the deferred reminder. The original request is preserved.', file=sys.stderr)
+        print('无法核对计划提醒，原请求已保留。', file=sys.stderr)
         return 1
 
 

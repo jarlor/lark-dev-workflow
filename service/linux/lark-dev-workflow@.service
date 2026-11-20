@@ -1,5 +1,5 @@
 [Unit]
-Description=Feishu project events and Codex scheduler (%i)
+Description=飞书项目通知与事项处理 (%i)
 Wants=network-online.target
 After=network-online.target
 

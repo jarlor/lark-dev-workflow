@@ -250,6 +250,20 @@ class EventBridgeTests(unittest.TestCase):
             stream.seek(0, 2)
             self.assertEqual(bridge.tick_status(stream, code), status)
 
+    def test_tick_messages_are_clear_for_service_watchers(self):
+        expected = {
+            'ran': '项目检查：已完成一轮处理。',
+            'unchanged': '项目检查：没有新的事项。',
+            'busy': '项目检查：上一轮还在处理，暂不重复启动。',
+            'paused': '项目检查：当前已暂停，没有执行操作。',
+            'recovery_required': '项目检查：需要先恢复上次未完成的工作。',
+            'failed': '项目检查失败：本轮没有完成，稍后会重试。',
+            'unknown': '项目检查：结果无法确认，请查看前后几行日志。',
+        }
+        for status, message in expected.items():
+            with self.subTest(status=status):
+                self.assertEqual(bridge.tick_message(status), message)
+
     @unittest.skipUnless(importlib.util.find_spec('lark_oapi'), 'optional service SDK is not installed')
     def test_pair_only_yields_tenant_from_matching_sdk_record_action(self):
         import lark_oapi as sdk
