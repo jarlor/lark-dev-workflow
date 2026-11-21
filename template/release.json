@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.5.2",
+    "skill_version": "2.5.3",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -124,7 +124,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.2",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.3",
   "documentation_updated_on": "2026-11-20",
   "validation_history": {
     "1.1.0": {
@@ -562,21 +562,22 @@
     }
   },
   "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.5.2",
+  "release_version": "2.5.3",
   "skill_release_validation": {
-    "version": "2.5.2",
+    "version": "2.5.3",
     "date": "2026-11-20",
     "template_version": "2.0.0",
     "scope": [
       "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
       "The dedicated assistant uses its existing scheduler. Digests default to hourly at the top of the hour from 09:00 to 21:00 Beijing time. Each morning starts with the current outstanding actions.",
-      "Service journal messages are written in plain English so an operator can understand checks, retries, pauses, and failures without internal status codes."
+      "Service journal messages are written in plain English so an operator can understand checks, retries, pauses, and failures without internal status codes.",
+      "Direct Feishu text messages are attributed to the sender and queued to the current Codex worker session."
     ],
     "status": "test_preview_verified_awaiting_human_acceptance",
     "observations": [
       "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records. The send path now drops ordinary AI-owned development actions from human digests, including stale cached observations."
     ],
-    "tests": 589,
+    "tests": 590,
     "environments": [
       "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
       "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"

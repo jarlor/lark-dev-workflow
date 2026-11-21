@@ -250,6 +250,27 @@ class EventBridgeTests(unittest.TestCase):
             stream.seek(0, 2)
             self.assertEqual(bridge.tick_status(stream, code), status)
 
+    def test_direct_message_is_queued_for_current_worker_with_sender_identity(self):
+        self.set_dispatch()
+        state_dir = Path(self.runner_config['state_dir'])
+        state_dir.mkdir()
+        self.runner_config.update(codex_bin=sys.executable, codex_profile='assistant', workdir=str(self.root))
+        self.runner.write_text(json.dumps(self.runner_config))
+        session = '11111111-1111-4111-8111-111111111111'
+        (state_dir / 'state.json').write_text(json.dumps({'session_id': session}))
+        envelope = dict(header=dict(app_id='cli_app', tenant_key='tenant',
+                                    event_type=bridge.IM_MESSAGE, event_id='direct-1'),
+                        event=dict(message=dict(message_type='text',
+                                                 content=json.dumps({'text': '现在在做什么？'})),
+                                   sender=dict(sender_id=dict(open_id='ou_person', name='张浩'))))
+        with mock.patch.object(bridge.subprocess, 'Popen') as start:
+            self.assertTrue(bridge.receive(envelope, self.config, self.journal))
+        command = start.call_args.args[0]
+        self.assertEqual(command[:4], [self.runner_config['codex_bin'], '--profile', self.runner_config['codex_profile'], 'queue'])
+        self.assertEqual(command[command.index('--thread') + 1], session)
+        self.assertIn('张浩（ou_person）', command[-1])
+        self.assertIn('现在在做什么？', command[-1])
+
     def test_tick_messages_are_clear_for_service_watchers(self):
         expected = {
             'ran': 'Project check: completed one pass.',

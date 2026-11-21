@@ -27,6 +27,7 @@ import deferred_notices
 
 RECORD = 'drive.file.bitable_record_changed_v1'
 COMMENT = 'drive.notice.comment_add_v1'
+IM_MESSAGE = 'im.message.receive_v1'
 RETENTION = 4096
 PINS = ('app_id', 'tenant_key', 'bot_open_id', 'base_token', 'project_record_id', 'lark_profile')
 TIMERS = {'reconcile_seconds': (600, 30, 86400), 'debounce_seconds': (5, 1, 300),
@@ -109,6 +110,37 @@ def runner_pins(config):
             or not set(config['table_ids']) <= {t['id'] for t in binding['tables'].values()}):
         raise ValueError('Runner actor, Base or project scope does not match the event service.')
     return tuple(str(Path(path).resolve()) for path in paths)
+
+
+def control_message(envelope, config):
+    """Queue a direct Feishu message for the current worker session."""
+    event = field(envelope, 'event')
+    message = field(event, 'message')
+    sender = field(field(event, 'sender'), 'sender_id')
+    sender_id = field(sender, 'open_id')
+    if not nonempty(sender_id) or field(message, 'message_type') != 'text':
+        return False
+    content = field(message, 'content')
+    try:
+        text = json.loads(content).get('text', '') if isinstance(content, str) else ''
+    except (TypeError, ValueError):
+        text = ''
+    if not isinstance(text, str) or not text.strip():
+        return False
+    runner = load(config['runner_config'])
+    state = load(Path(runner['state_dir']) / 'state.json')
+    session = state.get('session_id')
+    if not isinstance(session, str) or not re.fullmatch(r'[0-9a-f-]{36}', session):
+        return False
+    display_name = field(sender, 'name') or sender_id
+    prompt = f'来自飞书用户 {display_name}（{sender_id}）的直接消息：\n{text.strip()}'
+    command = [runner['codex_bin']]
+    if runner.get('codex_profile'):
+        command += ['--profile', runner['codex_profile']]
+    command += ['queue', '--thread', session, '--message', prompt]
+    subprocess.Popen(command, cwd=runner['workdir'], env=worker_environment(),
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return True
 
 
 
@@ -374,6 +406,8 @@ def receive(envelope, config, journal):
     if (field(header, 'app_id') != config['app_id'] or field(header, 'tenant_key') != config['tenant_key']
             or not nonempty(event_id)):
         return False
+    if kind == IM_MESSAGE:
+        return control_message(envelope, config)
     if kind == RECORD:
         table_id = field(event, 'table_id')
         actor = field(field(event, 'operator_id'), 'open_id')
@@ -411,6 +445,7 @@ def dispatcher(sdk, config, journal):
         receive(envelope, config, journal)
     return (sdk.EventDispatcherHandler.builder('', '')
             .register_p2_drive_file_bitable_record_changed_v1(handle)
+            .register_p2_im_message_receive_v1(handle)
             .register_p2_customized_event(COMMENT, handle).build())
 
 
