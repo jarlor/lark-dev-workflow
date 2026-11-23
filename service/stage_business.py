@@ -535,13 +535,13 @@ class Business:
         require(own_feedback <= parent_feedback, '研发项关联了无法对应到上游事项的反馈。')
         return parents
 
-    def previous(self, work, key):
+    def previous(self, work, key, *, dependent=None):
         """Verify the already recorded transition against this exact live row's history."""
         project = stage_action.Project(self.p.path, key)
         require(project.identity == self.p.identity, '关联工作属于另一个项目绑定。')
         path = project.directory / 'stage-actions' / (project.table + '-' + work + '.json')
         if not path.is_file():
-            self.archived_work(project, work, key)
+            self.archived_work(project, work, key, dependent=dependent)
             return
         import stat
         stage_action.private(path.parent, stat.S_ISDIR)
@@ -557,7 +557,7 @@ class Business:
         if not matches:
             require(not any(i.get('key') == key and i.get('business', {}).get('revision') == revision
                             for i in ledger['intents']), '本版研发项还有未核实或已失效的历史请求。')
-            self.archived_work(project, work, key)
+            self.archived_work(project, work, key, dependent=dependent)
             return
         require(len(matches) == 1, '找不到本版研发计划的唯一开工或交付记录。')
         intent = matches[0]
@@ -583,10 +583,15 @@ class Business:
         require(row['status'] in (['进行中'], ['已交付']), '关联研发项尚未开始。')
         self.proofs[(key, work)] = result['transition_revision']
 
-    def archived_work(self, project, work, key):
+    def archived_work(self, project, work, key, *, dependent=None):
         import stage_source
         require(stage_source.location(project) is not None, '关联研发项缺少可核实的实际开工或交付记录。')
         proof = stage_source.query(project, 'prior_action', 'work', work, prior_step=key)
+        if proof.get('method') == 'archived_browser_worker_delivery':
+            import historical_delivery
+            result = historical_delivery.verify(self, project, work, key, dependent, proof)
+            self.proofs[(key, work)] = result
+            return
         row = self.row('work', work)
         plan = self.approved('work', work)
         owners = ids(row['owner'])
@@ -742,7 +747,7 @@ class Business:
         deps = self.links('work', work, 'dependencies', 'work')
         for dep in deps:
             require(dep != work and self.row('work', dep)['status'] == ['已交付'], '有一条依赖研发项尚未交付。')
-            self.previous(dep, 'work-deliver')
+            self.previous(dep, 'work-deliver', dependent=work)
         if self.key == 'work-deliver':
             self.previous(work, 'work-start')
             self.delivery(work)

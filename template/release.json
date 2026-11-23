@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.6.0",
+    "skill_version": "2.6.1",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -124,7 +124,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.6.0",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.6.1",
   "documentation_updated_on": "2026-11-24",
   "validation_history": {
     "1.1.0": {
@@ -579,24 +579,42 @@
         "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
         "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
       ]
+    },
+    "2.6.0": {
+      "version": "2.6.0",
+      "date": "2026-11-24",
+      "template_version": "2.0.0",
+      "scope": [
+        "Reuse the original human plan decision only when authenticated record, revision and permitted assignee history agree.",
+        "Schedule each approved action independently of unrelated approvals, preserve backoff and revisit legacy waiting results once.",
+        "Read comment replies in bounded parallel batches without skipping older threads or acknowledging an incomplete scan."
+      ],
+      "status": "offline_regression_tested",
+      "observations": [
+        "An isolated read-only project scan returned the same threads and replies as its previous snapshot. Project deployment and business acceptance are verified separately."
+      ],
+      "tests": 603,
+      "environments": [
+        "macOS, Python 3.9, lark-oapi 1.8.0",
+        "Linux, Python 3.10, lark-oapi 1.8.0"
+      ]
     }
   },
   "comment_reader_sha256": "c062a4046a0d8e679c0f94ede3070ae71bfe9851b850012e4a0984fb410bbea6",
-  "release_version": "2.6.0",
+  "release_version": "2.6.1",
   "skill_release_validation": {
-    "version": "2.6.0",
+    "version": "2.6.1",
     "date": "2026-11-24",
     "template_version": "2.0.0",
     "scope": [
-      "Reuse the original human plan decision only when authenticated record, revision and permitted assignee history agree.",
-      "Schedule each approved action independently of unrelated approvals, preserve backoff and revisit legacy waiting results once.",
-      "Read comment replies in bounded parallel batches without skipping older threads or acknowledging an incomplete scan."
+      "Validate an enrolled prior worker’s original owner grant, exact plan, execution, artifact and self-test only for a directly linked dependency.",
+      "Do not treat a prior machine action as a human approval or acceptance. Retain a pending or inconsistent action for reconciliation."
     ],
     "status": "offline_regression_tested",
     "observations": [
-      "An isolated read-only project scan returned the same threads and replies as its previous snapshot. Project deployment and business acceptance are verified separately."
+      "Regression tests reject transferred or restored plans, detached dependencies, substituted accounts, missing evidence and invalid self-tests."
     ],
-    "tests": 603,
+    "tests": 610,
     "environments": [
       "macOS, Python 3.9, lark-oapi 1.8.0",
       "Linux, Python 3.10, lark-oapi 1.8.0"

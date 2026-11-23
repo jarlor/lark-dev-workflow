@@ -91,7 +91,7 @@ class Graph(business.Business):
         self.approvals[record] = (role, 1, 'f' * 64)
         return 1
 
-    def previous(self, work, key):
+    def previous(self, work, key, *, dependent=None):
         stage_action.require((work, key) in self.previous_ids, '缺少真实历史。')
 
     def source(self, kind, role, record):

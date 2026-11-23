@@ -129,6 +129,11 @@ def query(project, kind, role, record, *, prior_step=None):
     files = response_sources(data['sources'], roots, identities=identities)
     hashes = set(files.values())
     evidence = data['evidence']
+    if evidence.get('method') == 'archived_browser_worker_delivery':
+        import historical_delivery
+        require((kind, role, project.key, prior_step) == ('prior_action', 'work', 'work-deliver', 'work-deliver'),
+                '旧执行器的研发交付只可用于核实已交付的依赖。')
+        historical_delivery.check_sources(evidence, hashes)
     if kind in ('test', 'acceptance_plan', 'original_click', 'prior_action'):
         require(evidence.get('report_sha256') in hashes, '没有查到与本次原始报告摘要相同的文件。')
     if kind == 'original_click' and evidence.get('method') == 'archived_runner_history':
