@@ -101,8 +101,9 @@ def owner_transition(project, row, record, step, item, material=None):
     confirmation.match_history(event, [item], field, row['owner'][0]['name'], set(), (source, target))
 
 
-def authorized_owner_handoff(project, record, row, proof, item):
+def authorized_owner_handoff(project, record, row, proof, items):
     import stage_source
+    require(1 <= len(items) <= 2, '计划确认后出现了额外的负责人变化。')
     require(stage_source.location(project) is not None, '负责人变了，需要核对这次交接的授权和飞书记录。')
     material = stage_source.query(project, 'owner_handoff', 'work', record)
     owner_field = project.fields['owner']
@@ -123,15 +124,40 @@ def authorized_owner_handoff(project, record, row, proof, item):
                 ('plan_revision', 'business_revision'), ('confirmation_table_revision', 'table_revision'),
                 ('confirmation_update_time', 'update_time'))),
             '交接记录没有对应原负责人和这版计划的本人确认。')
-    require(material.get('history') == item and item.get('activity_type') == 'update'
-            and item.get('operator') == material['to_name'] and item['rev'] > proof['table_revision']
-            and type(item.get('create_time')) is int and item['create_time'] >= proof['update_time']
-            and len(item['field_changes']) == 1, '飞书历史没有证实这次单独的负责人交接。')
-    change = item['field_changes'][0]
-    require((change.get('field_id'), change.get('field_type'), change.get('before'), change.get('after')) ==
-            (owner_field['id'], 'User', material['from_name'], material['to_name']),
-            '飞书历史里的负责人变化与授权不同。')
-    return previous
+    revision, updated = proof['table_revision'], proof['update_time']
+    for item in items:
+        require(item.get('activity_type') == 'update' and type(item.get('rev')) is int and item['rev'] > revision
+                and type(item.get('create_time')) is int and item['create_time'] >= updated,
+                '负责人交接的历史时间或版本与原点击不符。')
+        revision, updated = item['rev'], item['create_time']
+
+    def owner_change(change, before, after):
+        return (change.get('field_id'), change.get('field_type'), change.get('before'), change.get('after')) == (
+            owner_field['id'], 'User', before, after)
+
+    if len(items) == 2:
+        claim, transfer = items
+        require(material.get('self_assignment_history') == claim
+                and previous == proof['operator_open_id'] == material.get('self_assignment_operator_open_id')
+                == material.get('authorization_author_open_id')
+                and material.get('transfer_operator_open_id') == project.bot
+                and material['from_name'] == row['plan_confirmer'][0]['name']
+                and len(claim['field_changes']) == 1 and owner_change(claim['field_changes'][0], '', material['from_name']),
+                '未能核实原确认人从空负责人自领，以及本人对这条事项交给助手的授权。')
+        confirmation.check_history_author(claim, material['from_name'])
+    else:
+        transfer, = items
+        require('self_assignment_history' not in material, '交接材料包含本行历史中没有的自领。')
+    require(material.get('history') == transfer, '飞书历史与这次负责人的交接回执不一致。')
+    confirmation.check_history_author(transfer, material['to_name'])
+    changes = transfer['field_changes']
+    owner = [c for c in changes if owner_change(c, material['from_name'], material['to_name'])]
+    next_step = project.fields.get('next_step')
+    notes = [c for c in changes if next_step and next_step['type'] == 'text' and c.get('field_id') == next_step['id']
+             and c.get('field_type') == 'Text' and isinstance(c.get('before'), str) and isinstance(c.get('after'), str)]
+    require(len(owner) == 1 and (len(changes) == 1 or len(items) == len(changes) == 2 and len(notes) == 1),
+            '飞书历史里的负责人变化与授权不同，或交接时改动了其他字段。')
+    return [] if len(items) == 2 else [previous]
 
 
 def record_history(project, role, record, seal, row, current_values):
@@ -155,7 +181,7 @@ def record_history(project, role, record, seal, row, current_values):
     edges = {(source, target) for r, _, source, target in rules.STAGE_REQUESTS.values() if r == role}
     stage = after
     owner_field = project.fields['owner']['id'] if role == 'work' else None
-    previous_owner = None
+    owner_changes = []
     acceptor_field = project.fields['acceptor']['id'] if role in ('requirements', 'bugs') else None
     filed = {}
     note_fields = {project.fields[k]['id']: k for k in ('confirmation', 'confirmed_revision', 'details')
@@ -177,9 +203,8 @@ def record_history(project, role, record, seal, row, current_values):
                     owner_transition(project, row, record, key, item)
                 stage = target
             elif fid is not None and fid == owner_field:
-                require(stage == after and previous_owner is None,
-                        '只可核对计划确认后、开工前的一次负责人交接。')
-                previous_owner = authorized_owner_handoff(project, record, row, proof, item)
+                require(stage == after, '只可核对计划确认后、开工前的负责人交接。')
+                owner_changes.append(item)
             elif fid is not None and fid == acceptor_field:
                 import acceptor_enrollment
                 require(stage in ('可研发', '研发中') and fid not in filed,
@@ -198,8 +223,8 @@ def record_history(project, role, record, seal, row, current_values):
     # A seal always records the fields at the original click. A handoff never
     # replaces that approval or changes the digest held by earlier actions.
     approved_values = {**current_values, **filed}
-    if previous_owner is not None:
-        approved_values[owner_field] = [previous_owner]
+    if owner_changes:
+        approved_values[owner_field] = authorized_owner_handoff(project, record, row, proof, owner_changes)
     return history[0], approved_values
 
 
@@ -211,7 +236,8 @@ def capture(project, role, record, row, values):
         observed = confirmation.receipt(*args)
         observations.append(observed)
         return observed
-    proof = confirmation.verify(project.path, role, record, receipt_reader=original)
+    handoff = {'work_handoff_project': project} if role == 'work' else {}
+    proof = confirmation.verify(project.path, role, record, receipt_reader=original, **handoff)
     revision, person = validate_row(project, role, row)
     require(proof.get('status') == 'verified' and proof.get('check') == 'current_record_human_transition'
             and proof.get('role') == role and proof.get('project_record_id') == project.project

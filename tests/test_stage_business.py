@@ -76,7 +76,7 @@ class ConfirmationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.set_project('work')
-        def verify(*args, receipt_reader):
+        def verify(*args, receipt_reader, work_handoff_project=None):
             receipt_reader()
             receipt_reader()
             return self.p.proof()
@@ -165,6 +165,65 @@ class ConfirmationTests(unittest.TestCase):
         self.assertEqual(first['confirmation_sha256'], self.check()['confirmation_sha256'])
         book = json.loads(next((self.p.directory / 'stage-confirmations').glob('*.json')).read_text())
         self.assertEqual(book['confirmations'][0]['fields'][self.p.fields['owner']['id']], ['ou_previous'])
+
+    def self_assignment(self, *, seal_first=True):
+        p = self.p
+        confirmer = p.row['plan_confirmer'][0]
+        p.row['owner'] = None
+        original = self.check() if seal_first else None
+        p.add_change('owner', '', confirmer['name'], confirmer['name'])
+        claim = p.rows[0]
+        claim['field_changes'][0]['field_type'] = 'User'
+        _, material = self.hand_over(seal_first=False)
+        transfer = p.rows[0]
+        transfer['field_changes'][0]['before'] = confirmer['name']
+        transfer['field_changes'].insert(0, dict(field_id=p.fields['next_step']['id'], field_type='Text',
+                                                 before='等待接手', after='准备执行'))
+        material.update(from_open_id=confirmer['id'], from_name=confirmer['name'], history=copy.deepcopy(transfer),
+                        self_assignment_operator_open_id=confirmer['id'], authorization_author_open_id=confirmer['id'],
+                        transfer_operator_open_id=p.bot, self_assignment_history=copy.deepcopy(claim))
+        return original, material
+
+    def test_self_assignment_then_authorized_transfer_preserves_original_empty_owner_and_click(self):
+        for seal_first in (False, True):
+            with self.subTest(seal_first=seal_first):
+                self.set_project('work')
+                original, _ = self.self_assignment(seal_first=seal_first)
+                result = self.check()
+                self.assertEqual(result['status'], 'verified', result)
+                self.assertEqual(result['event_id'], self.p.event()['event_id'])
+                if original:
+                    self.assertEqual(result['confirmation_sha256'], original['confirmation_sha256'])
+                book_path = next((self.p.directory / 'stage-confirmations').glob('*.json'))
+                seals = json.loads(book_path.read_text())['confirmations']
+                self.assertEqual(len(seals), 1)
+                self.assertEqual(seals[0]['fields'][self.p.fields['owner']['id']], [])
+                book_path.unlink()
+
+    def test_self_assignment_needs_the_same_author_and_exact_history_even_without_a_seal(self):
+        _, material = self.self_assignment(seal_first=False)
+        for key in ('self_assignment_operator_open_id', 'authorization_author_open_id', 'transfer_operator_open_id',
+                    'from_open_id', 'self_assignment_history'):
+            for replacement in (None, 'ou_other'):
+                with self.subTest(key=key, replacement=replacement), mock.patch.dict(material, {key: replacement}):
+                    self.assertEqual(self.check()['status'], 'pending')
+        transfer, claim, _ = self.p.rows
+        for item, field, key, replacement in (
+            (claim, 'self_assignment_history', 'operator', '另一人'),
+            (claim, 'self_assignment_history', 'on_behalf_of', 'automation'),
+            (transfer, 'history', 'operator', '另一人'),
+            (transfer, 'history', 'on_behalf_of', 'another'),
+        ):
+            with self.subTest(key=key, replacement=replacement), mock.patch.dict(item, {key: replacement}), \
+                 mock.patch.dict(material, {field: copy.deepcopy(item)}):
+                self.assertEqual(self.check()['status'], 'pending')
+        for field in ('plan', 'plan_revision', 'scope', 'dependencies', 'plan_confirmer', 'owner', 'status', 'human_action'):
+            with self.subTest(field=field), mock.patch.dict(transfer['field_changes'][0],
+                    {'field_id': self.p.fields[field]['id']}), mock.patch.dict(material, {'history': copy.deepcopy(transfer)}):
+                self.assertEqual(self.check()['status'], 'pending')
+        with mock.patch.dict(claim['field_changes'][0], {'before': '原负责人'}), \
+             mock.patch.dict(material, {'self_assignment_history': copy.deepcopy(claim)}):
+            self.assertEqual(self.check()['status'], 'pending')
 
     def test_actual_archived_click_can_be_rechecked_after_handoff(self):
         import stage_source

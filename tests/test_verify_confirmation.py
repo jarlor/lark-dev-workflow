@@ -4,6 +4,7 @@ from pathlib import Path
 import sys
 import subprocess
 import time
+from types import SimpleNamespace
 from unittest import mock
 
 from test_native_stage_inspection import ProjectionReader
@@ -28,12 +29,12 @@ class ConfirmationTests(RuntimeFixture):
         self.steps = self.fields['status']['stage_contract']['steps']
         self.steps[0]['person_field'] = 'plan_confirmer'
         for key, kind in [('plan_revision', 'number'), ('scope', 'text'), ('deliverable', 'text'),
-                          ('verification_plan', 'text'), ('next_step', 'text')]:
+                          ('verification_plan', 'text'), ('next_step', 'text'), ('owner', 'user')]:
             self.fields[key] = {'id': 'fld' + key, 'type': kind}
         self.row = self.reader.data['tblWork'][0]['values']
         self.row.update(fldConfirmer=[{'id':'ou_person', 'name':'小吴'}], fldPlan='展示预计送达日期',
                         fldplan_revision=2, fldscope='订单详情', flddeliverable='可见日期',
-                        fldverification_plan='核对两种配送方式', fldnext_step='等待确认', fldStage=['可开始'])
+                        fldverification_plan='核对两种配送方式', fldnext_step='等待确认', fldStage=['可开始'], fldowner=[])
         self.config.update(format_version=3, event_tenant_key='tenant_demo')
         self.save_config()
         write_json(self.project_path, self.binding)
@@ -114,6 +115,41 @@ class ConfirmationTests(RuntimeFixture):
         self.assertEqual((result['status'],result.get('event_id'),result.get('business_revision')),
                          ('verified','evt19',2), result)
         self.assertEqual(before, self.journal.path.read_bytes())
+
+    def test_first_seal_after_handoff_uses_the_registered_event_and_reviewed_history(self):
+        import stage_source
+        with self.journal.connect() as conn:
+            conn.execute('DELETE FROM receipts')
+        self.event(event_id='evtOriginal', before='optAlpha', after='optBeta')
+        project = SimpleNamespace(config=bridge.config_from(self.service_path), binding=self.binding, fields=self.fields,
+                                  key='work-start', table='tblWork', project='recA', bot='ou_assistant')
+        human, bot = self.row['fldConfirmer'][0], dict(id=project.bot, name='研发助手')
+        self.row['fldowner'] = [bot]
+        def owner_change(before, after):
+            return dict(field_id='fldowner', field_type='User', before=before, after=after)
+        claim = dict(activity_type='update', rev=21, create_time=self.now-4, operator=human['name'],
+                     field_changes=[owner_change('', human['name'])])
+        transfer = dict(activity_type='update', rev=23, create_time=self.now-3, operator=bot['name'], field_changes=[
+            dict(field_id='fldnext_step', field_type='Text', before='待接手', after='开始执行'),
+            owner_change(human['name'], bot['name'])])
+        self.entries[:0] = [transfer, claim]
+        material = dict(method='authorized_owner_handoff', project_record_id=project.project, table_id=project.table,
+                        record_id='recWork', owner_field_id='fldowner', from_open_id=human['id'], from_name=human['name'],
+                        to_open_id=bot['id'], to_name=bot['name'], plan_confirmer_open_id=human['id'], plan_revision=2,
+                        confirmation_table_revision=19, confirmation_update_time=self.now-5, history=copy.deepcopy(transfer),
+                        self_assignment_history=copy.deepcopy(claim), self_assignment_operator_open_id=human['id'],
+                        authorization_author_open_id=human['id'], transfer_operator_open_id=bot['id'])
+        self.assertEqual(self.verify()['status'], 'pending')
+        with mock.patch.object(stage_source, 'location', return_value=self.directory), \
+             mock.patch.object(stage_source, 'query', return_value=material) as query:
+            verified = self.verify(work_handoff_project=project)
+            self.assertEqual((verified.get('event_id'), verified.get('table_revision')), ('evtOriginal', 19), verified)
+            query.assert_called_once_with(project, 'owner_handoff', 'work', 'recWork')
+            with mock.patch.dict(material, {'authorization_author_open_id': project.bot}):
+                self.assertEqual(self.verify(work_handoff_project=project)['status'], 'pending')
+            with self.journal.connect() as conn:
+                conn.execute('DELETE FROM receipts')
+            self.assertEqual(self.verify(work_handoff_project=project)['status'], 'pending')
 
     def test_same_name_is_not_identity_and_automation_history_is_not_a_click(self):
         self.row['fldConfirmer'] = [{'id':'ou_other','name':'小吴'}]

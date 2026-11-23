@@ -229,7 +229,7 @@ def handoff(source, candidate, apply=None):
         target = runtime.load_state(state_path, runtime.identity(new, target_binding))
         if not state_exists:
             target.update({key: state[key] for key in ('session_id', 'session_runs', 'session_history',
-                          'session_handoff', 'last_result') if key in state})
+                          'session_handoff', 'last_result', 'continuation_queue') if key in state})
             target['actor_handoff'] = {'at': datetime.fromtimestamp(reviewed_at, timezone.utc).isoformat(),
                                        'previous_state_dir': str(source_dir), 'review_sha256': digest,
                                        'instruction': '仅参考旧目录中的处理记录及待办，不使用旧身份或历史登录，不重放已做写入。以本次完整扫描核实当前状态和人的确认。'}

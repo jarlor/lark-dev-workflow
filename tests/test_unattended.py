@@ -79,9 +79,14 @@ class RuntimeFixture(unittest.TestCase):
     def execute(self, config, state, run_dir, prompt, lock_fd, save_state):
         self.calls.append({'state': copy.deepcopy(state), 'dir': run_dir, 'prompt': prompt})
         inflight = state['inflight']
+        kind = {'waiting': 'timer' if self.delay else 'human', 'continue': 'ready',
+                'paused': 'human', 'idle': 'closed'}[self.outcome]
+        item = dict(key='record/action', state=kind, next_step='核对页面', evidence='原事项的答复',
+                    check_at=int(self.timestamp + self.delay) if kind == 'timer' else None)
         return {'run_id': inflight['run_id'], 'snapshot_id': inflight['snapshot_id'],
                 'outcome': self.outcome, 'summary': '已查看，等待回复',
-                'next_step': '请补充出错页面', 'retry_after_seconds': self.delay}, self.session
+                'next_step': '请补充出错页面', 'retry_after_seconds': self.delay,
+                'continuation_items': [item]}, self.session
 
     def tick(self, **kwargs):
         # Prompt rendering is tested separately; state transitions need no actual Skill invocation.
@@ -759,6 +764,8 @@ prompt = sys.stdin.read()
 context = json.loads(prompt)
 result_path = pathlib.Path(sys.argv[sys.argv.index('--output-last-message') + 1])
 result = dict(context, outcome='waiting', summary='等待补充页面', next_step='请提供页面地址', retry_after_seconds=0)
+result['continuation_items'] = [dict(key='case/address', state='human', next_step='等待本人补充页面',
+                                     evidence='原提问和回复记录', check_at=None)]
 result_path.write_text(json.dumps(result))
 print(json.dumps({'type': 'thread.started', 'thread_id': '11111111-1111-4111-8111-111111111111'}))
 print(json.dumps({'type': 'turn.completed'}))

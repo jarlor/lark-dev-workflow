@@ -168,6 +168,24 @@ class EventBridgeTests(unittest.TestCase):
         self.config.update(mode='dispatch', runner_config=str(self.runner), tick_argv=argv)
         self.config_path.write_text(json.dumps(self.config))
 
+    def test_dispatch_observes_worker_deadline_then_replaces_it_after_early_event(self):
+        self.set_dispatch()
+        schedule = bridge.Schedule(bridge.config_from(self.config_path))
+        clean = dict(received=1, acknowledged=1)
+        with mock.patch.object(bridge.time, 'time', return_value=100000):
+            for payload in ({'status': 'ran', 'next_due_at': 100300}, {'status': 'unchanged', 'next_due_at': 100300}):
+                stream = io.BytesIO(json.dumps(payload).encode())
+                stream.seek(0, 2)
+                status, due = bridge.tick_result(stream, 0)
+                schedule.finished(status, 50, due)
+                self.assertFalse(schedule.due(clean, 349))
+                self.assertTrue(schedule.due(clean, 350))
+            schedule.finished('ran', 100, None)
+            self.assertFalse(schedule.due(clean, 350))
+            self.assertTrue(schedule.due(clean, 700))
+            schedule.finished('failed', 700, 100001)
+            self.assertFalse(schedule.due(clean, 701))
+
     def test_refuses_other_runner_project_or_personal_identity(self):
         self.set_dispatch()
         self.assertEqual(bridge.config_from(self.config_path)['mode'], 'dispatch')

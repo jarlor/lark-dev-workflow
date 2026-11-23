@@ -155,7 +155,7 @@ def inline_text(value):
     return bool(body) and not re.fullmatch(
         r'(?:详细方案|详情|完整计划)?(?:详见|参见|请见|见|请打开|打开)?(?:附件|文档|链接)?', body)
 
-def match_history(event, items, field_id, person_name, informational, transition):
+def match_history(event, items, field_id, person_name, informational, transition, *, checked_owner_edits=()):
     previous_rev, previous_time = None, None
     matches = 0
     for item in items:
@@ -172,7 +172,7 @@ def match_history(event, items, field_id, person_name, informational, transition
         for change in changes:
             fid = change.get('field_id')
             require(isinstance(fid, str) and fid, '历史操作没有指明改了哪个字段。')
-            if fid in informational:
+            if fid in informational or (rev, fid) in checked_owner_edits:
                 continue
             if (rev == event['event_revision'] and second == event['update_time'] and fid == field_id
                     and change.get('field_type') == 'Stage'
@@ -184,7 +184,8 @@ def match_history(event, items, field_id, person_name, informational, transition
     require(matches == 1, '没有找到唯一一笔与事件的时间、表版本和节点变化都一致的操作。')
 
 
-def verify(config_path, role, record_id, *, acceptance_revision=None, reader_factory=watch.Cli, receipt_reader=None):
+def verify(config_path, role, record_id, *, acceptance_revision=None, reader_factory=watch.Cli, receipt_reader=None,
+           work_handoff_project=None):
     # A trusted host may retain the original Feishu event separately from the compact journal.
     # Both reads must use the same source. All live field, history and actor checks still apply.
     read_receipt = receipt if receipt_reader is None else receipt_reader
@@ -268,7 +269,24 @@ def verify(config_path, role, record_id, *, acceptance_revision=None, reader_fac
         display_only = ('human_action', 'next_step') if acceptance else ('human_action', 'next_step', 'processing', 'summary')
         informational = {fields[k]['id'] for k in display_only if k in fields and k not in needed}
         entries = history(reader, token, table_id, record_id)
-        match_history(event, entries, status['id'], people[0]['name'], informational, (before, after))
+        checked_owner_edits = set()
+        if work_handoff_project is not None:
+            import stage_business
+            project = work_handoff_project
+            require(not acceptance and role == 'work' and project.config == config and project.binding == binding
+                    and (project.key, project.table, project.project, project.bot) ==
+                        ('work-start', table_id, scope['project_record_id'], config['bot_open_id']),
+                    '负责人交接材料与本次计划确认的项目不符。')
+            owner = fields['owner']['id']
+            edits = [item for item in reversed(entries) if item['rev'] > event['event_revision']
+                     and any(c.get('field_id') == owner for c in item['field_changes'])]
+            if edits:
+                proof = dict(operator_open_id=event['operator_open_id'], business_revision=live[revision],
+                             table_revision=event['event_revision'], update_time=event['update_time'])
+                stage_business.authorized_owner_handoff(project, record_id, live, proof, edits)
+                checked_owner_edits = {(item['rev'], owner) for item in edits}
+        match_history(event, entries, status['id'], people[0]['name'], informational, (before, after),
+                      checked_owner_edits=checked_owner_edits)
         require(live == current(), '核对期间这条记录又变了。')
         # Catch a write-and-revert during either read without scanning any other record.
         head = reader.base.read('+record-history-list', '--base-token', token, '--table-id', table_id,

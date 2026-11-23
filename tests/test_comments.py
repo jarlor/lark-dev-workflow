@@ -153,6 +153,27 @@ class PaginationTests(unittest.TestCase):
                 self.assertEqual(state['events'], {})
                 self.assertIsNone(state['last_complete_scan'])
 
+    def test_parallel_replies_keep_order_and_never_fetch_next_batch_after_failure(self):
+        from unittest.mock import patch
+        from threading import Barrier
+        threads = [comment(str(i)) for i in range(9)]
+        seen = []
+        barrier = Barrier(4, timeout=5)
+        def get(cli, cmd, resource, *, comment_id):
+            seen.append(comment_id)
+            if int(comment_id) < 4:
+                barrier.wait()
+            if comment_id == '2':
+                raise m.CommentError('permission denied')
+            return [reply('r' + comment_id)]
+        with patch.object(m, 'pages', side_effect=get), self.assertRaises(m.CommentError):
+            list(m.read_threads(None, {}, threads))
+        self.assertEqual(sorted(seen), ['0', '1', '2', '3'])
+        with patch.object(m, 'pages', side_effect=lambda *a, comment_id: [reply('r' + comment_id)]):
+            rows = list(m.read_threads(None, {}, threads))
+        self.assertEqual([(t['comment_id'], r[0]['reply_id']) for t, r in rows],
+                         [(str(i), 'r' + str(i)) for i in range(9)])
+
     def test_failure_preserves_all_prior_observations_and_acknowledgements(self):
         initial, _ = scanned()
         initial, _ = m.acknowledgement(initial, ack_payload(m.pending(initial)[0]))

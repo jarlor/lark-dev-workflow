@@ -7,6 +7,7 @@ disposition, never independent proof that a remote update or approval happened.
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import copy
 from datetime import datetime, timezone
@@ -479,6 +480,25 @@ def load_state(path, config):
     return upgrade_state(state)
 
 
+def read_threads(cli, resource, comments):
+    """Pipeline independent reads, never skip an old thread or commit a partial scan."""
+    def fetch(comment):
+        replies = pages(cli, '+list-replies', resource, comment_id=comment['comment_id'])
+        if not replies:
+            raise CommentError('Comment thread has no readable root reply; retry the scan.')
+        return comment, replies
+
+    # Only parallelize network reads. The scope locator and journal keep their
+    # original order. On errors the next batch is not submitted.
+    width = 4
+    if len(comments) < 2:
+        yield from map(fetch, comments)
+        return
+    with ThreadPoolExecutor(max_workers=width) as pool:
+        for start in range(0, len(comments), width):
+            yield from pool.map(fetch, comments[start:start + width])
+
+
 def scan(config, state, cli, *, include_resolved=False, known=None):
     state = upgrade_state(state)
     scan_id = str(uuid.uuid4())
@@ -489,11 +509,7 @@ def scan(config, state, cli, *, include_resolved=False, known=None):
         for resource in resources(config):
             comments = pages(cli, '+list-comments', resource, include_resolved=include_resolved)
             reply_count = 0
-            for comment in comments:
-                # Always read replies from page one: nested has_more may be absent.
-                replies = pages(cli, '+list-replies', resource, comment_id=comment['comment_id'])
-                if not replies:
-                    raise CommentError('Comment thread has no readable root reply; retry the scan.')
+            for comment, replies in read_threads(cli, resource, comments):
                 location = locator.locate(resource, comment, replies)
                 observations.extend(normalize_reply(resource, comment, reply, replies[0]['reply_id'], location)
                                     for reply in replies)

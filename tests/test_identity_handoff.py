@@ -53,6 +53,7 @@ class Handoff(RuntimeFixture):
         self.assertEqual((self.old_dir / 'state.json').read_bytes(), previous)
         state = runtime.read_json(self.bot_dir / 'state.json')
         self.assertEqual((state['session_id'], state['last_result']), (self.session, self.state()['last_result']))
+        self.assertEqual(state['continuation_queue'], self.state()['continuation_queue'])
         self.assertIsNone(state['checkpoint'])
         self.assertEqual(state['actor_handoff']['previous_state_dir'], str(self.old_dir))
         self.assertFalse((self.bot_dir / 'checkpoint-snapshot.json').exists())

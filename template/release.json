@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.5.3",
+    "skill_version": "2.6.0",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -124,8 +124,8 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.5.3",
-  "documentation_updated_on": "2026-11-20",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.6.0",
+  "documentation_updated_on": "2026-11-24",
   "validation_history": {
     "1.1.0": {
       "independent_checks_passed": 15,
@@ -559,28 +559,47 @@
         "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
       ],
       "tests": 557
+    },
+    "2.5.3": {
+      "version": "2.5.3",
+      "date": "2026-11-20",
+      "template_version": "2.0.0",
+      "scope": [
+        "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
+        "The dedicated assistant uses its existing scheduler. Digests default to hourly at the top of the hour from 09:00 to 21:00 Beijing time. Each morning starts with the current outstanding actions.",
+        "Service journal messages are written in plain English so an operator can understand checks, retries, pauses, and failures without internal status codes.",
+        "Direct Feishu text messages are attributed to the sender and queued to the current Codex worker session."
+      ],
+      "status": "test_preview_verified_awaiting_human_acceptance",
+      "observations": [
+        "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records. The send path now drops ordinary AI-owned development actions from human digests, including stale cached observations."
+      ],
+      "tests": 590,
+      "environments": [
+        "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
+        "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
+      ]
     }
   },
-  "comment_reader_sha256": "ba72af558ae0624e0e979439e5951ce0a207f77067420b2434cc154cc2da82d4",
-  "release_version": "2.5.3",
+  "comment_reader_sha256": "c062a4046a0d8e679c0f94ede3070ae71bfe9851b850012e4a0984fb410bbea6",
+  "release_version": "2.6.0",
   "skill_release_validation": {
-    "version": "2.5.3",
-    "date": "2026-11-20",
+    "version": "2.6.0",
+    "date": "2026-11-24",
     "template_version": "2.0.0",
     "scope": [
-      "Opt-in project bot direct messages group outstanding actions by verified recipient and link each action to its original project record.",
-      "The dedicated assistant uses its existing scheduler. Digests default to hourly at the top of the hour from 09:00 to 21:00 Beijing time. Each morning starts with the current outstanding actions.",
-      "Service journal messages are written in plain English so an operator can understand checks, retries, pauses, and failures without internal status codes.",
-      "Direct Feishu text messages are attributed to the sender and queued to the current Codex worker session."
+      "Reuse the original human plan decision only when authenticated record, revision and permitted assignee history agree.",
+      "Schedule each approved action independently of unrelated approvals, preserve backoff and revisit legacy waiting results once.",
+      "Read comment replies in bounded parallel batches without skipping older threads or acknowledging an incomplete scan."
     ],
-    "status": "test_preview_verified_awaiting_human_acceptance",
+    "status": "offline_regression_tested",
     "observations": [
-      "A read-only Linux preview against an isolated test copy with the hourly configuration prepared one rich-text message with links to the underlying records. The send path now drops ordinary AI-owned development actions from human digests, including stale cached observations."
+      "An isolated read-only project scan returned the same threads and replies as its previous snapshot. Project deployment and business acceptance are verified separately."
     ],
-    "tests": 590,
+    "tests": 603,
     "environments": [
-      "Linux, Python 3.10, Node.js 22, lark-oapi 1.8.0",
-      "macOS, Python 3.9, Node.js 22, lark-oapi 1.8.0"
+      "macOS, Python 3.9, lark-oapi 1.8.0",
+      "Linux, Python 3.10, lark-oapi 1.8.0"
     ]
   },
   "source_at_packaging": {

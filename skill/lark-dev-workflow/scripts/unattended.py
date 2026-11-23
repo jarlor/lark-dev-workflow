@@ -25,6 +25,7 @@ import work_packet
 import own_effects
 import gate_events
 import registered_requests
+import continuation
 
 HERE = Path(__file__).resolve().parent
 # These are workflow limits for the existing worker, not operating-system permissions.
@@ -35,14 +36,16 @@ PREPARE_SCOPE = {
     'native_stage_writes': False,
     'implementation_or_dispatch': False,
 }
+LEGACY_RESULT_FIELDS = ('run_id', 'snapshot_id', 'outcome', 'summary', 'next_step', 'retry_after_seconds')
 RESULT_SCHEMA = {
     'type': 'object', 'additionalProperties': False,
-    'required': ['run_id', 'snapshot_id', 'outcome', 'summary', 'next_step', 'retry_after_seconds'],
+    'required': [*LEGACY_RESULT_FIELDS, 'continuation_items'],
     'properties': {
         'run_id': {'type': 'string'}, 'snapshot_id': {'type': 'string'},
         'outcome': {'type': 'string', 'enum': ['continue', 'waiting', 'idle', 'paused']},
         'summary': {'type': 'string'}, 'next_step': {'type': 'string'},
         'retry_after_seconds': {'type': 'integer', 'minimum': 0, 'maximum': 86400},
+        'continuation_items': continuation.ITEMS_SCHEMA,
     },
 }
 
@@ -167,8 +170,11 @@ def should_run(state, snapshot_id, timestamp, reconcile_seconds):
     return False, 'unchanged'
 
 
-def validate_result(result, run_id, snapshot_id):
-    if not isinstance(result, dict) or set(result) != set(RESULT_SCHEMA['required']):
+def validate_result(result, run_id, snapshot_id, *, historical=True):
+    allowed = [set(RESULT_SCHEMA['required'])]
+    if historical:
+        allowed.append(set(LEGACY_RESULT_FIELDS))
+    if not isinstance(result, dict) or set(result) not in allowed:
         raise RunnerError('Codex 未返回完整的本轮运行结果。')
     if result['run_id'] != run_id or result['snapshot_id'] != snapshot_id:
         raise RunnerError('Codex 结果对应其他轮次或快照。')
@@ -179,6 +185,11 @@ def validate_result(result, run_id, snapshot_id):
         raise RunnerError('下次检查时间无效。')
     if not all(isinstance(result[key], str) and result[key].strip() for key in ['summary', 'next_step']):
         raise RunnerError('运行结果缺少说明或下一步。')
+    if 'continuation_items' in result:
+        try:
+            continuation.checked_items(result['continuation_items'])
+        except ValueError as exc:
+            raise RunnerError(str(exc)) from exc
     return result
 
 
@@ -242,7 +253,9 @@ def build_prompt(config, state, run_id, snapshot_id, snapshot_file, reason, expe
             'handoff_file': str(Path(snapshot_file).with_name('handoff.json')),
         },
         'session_handoff': state.get('session_handoff'),
-        'previous_result': state.get('last_result'),
+        'previous_result': ({key: value for key, value in state['last_result'].items()
+                             if key != 'continuation_items'} if state.get('last_result') else None),
+        'previous_continuation': [entry['item'] for entry in state.get('continuation_queue', {}).values()],
         'recovery_note': state.get('recovery_note'),
         'previous_interrupted_run': (state.get('recoveries') or [{}])[-1].get('inflight'),
     }
@@ -532,9 +545,12 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
                 run, reason = True, 'gate_event_evidence'
             # Keep the existing state key so a pending worker can upgrade in place.
             if (not run and policy is not None and previous_mode == mode
-                    and (state.get('last_result') or {}).get('outcome') == 'waiting'
+                    and state.get('scheduled_outcome', (state.get('last_result') or {}).get('outcome')) == 'waiting'
                     and state.get('registered_start_check_revision', 1) < registered_requests.STAGE_CHECK_REVISION):
                 run, reason = True, 'registered_stage_check_updated'
+            if (not run and 'continuation_queue' not in state and
+                    (state.get('last_result') or {}).get('outcome') in ('waiting', 'continue')):
+                run, reason = True, 'continuation_review'
             if not run:
                 state['idle_wakes'] = 0
                 state.pop('last_error', None)
@@ -543,7 +559,7 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
                     state['effects_consumed_run'] = state['last_result']['run_id']
                     optional_json(directory / 'checkpoint-snapshot.json', snapshot, state)
                 save()
-                return {'status': 'unchanged', 'own_writes_verified': own_only,
+                return {'status': 'unchanged', 'own_writes_verified': own_only, 'next_due_at': state.get('next_due_at'),
                         'message': '仅有已核实的自身写入，本轮不启动 Codex。' if own_only
                                    else '没有变化，本轮不启动 Codex。'}
             if paused.exists():
@@ -599,32 +615,33 @@ def tick(config_path, *, collector=watch.collect, executor=execute, clock=time.t
             }, state)
             save()
             result, session_id = executor(config, state, run_dir, prompt, lock_fd, save)
-            validate_result(result, run_id, snapshot_id)
+            validate_result(result, run_id, snapshot_id, historical=False)
+            finished = clock()
+            queue, outcome, due = continuation.schedule(result, state.get('continuation_queue', {}), finished,
+                                                       config['interval_minutes'] * 60, config['max_consecutive_runs'])
             if previous_mode != mode:
                 atomic_json(mode_file, mode)
             if gate_checkpoint:
                 state['gate_event_checkpoint'] = gate_checkpoint
             # Only the START snapshot is delivered. Changes made during execution remain visible.
             state.update(checkpoint=snapshot_id, session_id=session_id,
-                         last_result=result, last_success_at=now(), last_success_epoch=clock())
+                         last_result=result, last_success_at=now(), last_success_epoch=finished,
+                         continuation_queue=queue, scheduled_outcome=outcome, next_due_at=due)
             if policy is not None:
                 state['registered_start_check_revision'] = registered_requests.STAGE_CHECK_REVISION
             state['session_runs'] = run_context.session_runs(state, config['session_max_runs']) + 1
             state.pop('session_handoff', None)
             optional_json(directory / 'checkpoint-snapshot.json', snapshot, state)
-            delay = result['retry_after_seconds']
-            if result['outcome'] == 'continue':
-                delay = max(delay, config['interval_minutes'] * 60)
-            state['next_due_at'] = clock() + delay if delay else None
             state['idle_wakes'] = (state.get('idle_wakes', 0) + 1
-                                   if reason == 'changed' and result['outcome'] in ('idle', 'waiting') else 0)
+                                   if reason == 'changed' and outcome in ('idle', 'waiting') else 0)
             state.pop('inflight', None)
             state.pop('last_error', None)
             state.pop('recovery_note', None)
             save()
-            if result['outcome'] == 'paused':
+            if outcome == 'paused':
                 paused.write_text(result['summary'] + '\n', encoding='utf-8')
-            return {'status': 'ran', 'run_id': run_id, 'outcome': result['outcome'], 'summary': result['summary']}
+            return {'status': 'ran', 'run_id': run_id, 'outcome': outcome,
+                    'next_due_at': due, 'summary': result['summary']}
         except (RunnerError, OnboardingError, OSError, ValueError, TypeError, KeyError) as exc:
             state['last_error'] = {'at': now(), 'message': str(exc)}
             if state.get('inflight'):

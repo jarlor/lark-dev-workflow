@@ -575,21 +575,30 @@ class Schedule:
         return now >= self.next_check or (snapshot['received'] > snapshot['acknowledged']
                                           and now >= self.hint_not_before)
 
-    def finished(self, status, now):
+    def finished(self, status, now, next_due_at=None):
         ok = status in ('ran', 'unchanged')
         self.next_check = now + self.config['reconcile_seconds' if ok else 'retry_seconds']
+        if ok and type(next_due_at) in (float, int) and 0 < next_due_at <= 253402300799:
+            self.next_check = min(self.next_check, now + max(1, next_due_at - time.time()))
         self.hint_not_before = now + self.config['debounce_seconds'] if ok else self.next_check
 
 
-def tick_status(stream, returncode):
+def tick_result(stream, returncode):
     if returncode != 0 or stream.tell() > 1024 * 1024:
-        return 'failed'
+        return 'failed', None
     stream.seek(0)
     try:
-        status = json.load(stream)['status']
+        result = json.load(stream)
+        status = result['status']
     except (KeyError, TypeError, ValueError, UnicodeError):
-        return 'unknown'
-    return status if status in ('ran', 'unchanged', 'busy', 'paused', 'recovery_required') else 'unknown'
+        return 'unknown', None
+    if status not in ('ran', 'unchanged', 'busy', 'paused', 'recovery_required'):
+        return 'unknown', None
+    return status, result.get('next_due_at')
+
+
+def tick_status(stream, returncode):
+    return tick_result(stream, returncode)[0]
 
 
 def tick_message(status):
@@ -712,12 +721,12 @@ def supervise(path, config, journal):
                 if reminder and reminder.poll() is not None:
                     reminder = None
                 if worker and worker.poll() is not None:
-                    status = tick_status(output, worker.returncode)
+                    status, next_due_at = tick_result(output, worker.returncode)
                     journal.finish(captured, status)
                     print(tick_message(status), file=sys.stderr, flush=True)
                     output.close()
                     output, worker = None, None
-                    schedule.finished(status, now)
+                    schedule.finished(status, now, next_due_at)
                     if not stop:
                         reminder = retry_after_tick(path, config, expected, status, listener)
                 if expected and worker is None and reminder is None:
