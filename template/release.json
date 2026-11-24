@@ -16,7 +16,7 @@
       2
     ],
     "binding_format_generated": 2,
-    "skill_version": "2.6.1",
+    "skill_version": "2.6.2",
     "linux_unattended": {
       "runner_config_format": 1,
       "requires_project_binding_format": 2,
@@ -124,7 +124,7 @@
   ],
   "source_display_name": "Agent研发工作流｜v2.0.0",
   "repository_url": "https://github.com/jarlor/lark-dev-workflow",
-  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.6.1",
+  "release_url": "https://github.com/jarlor/lark-dev-workflow/releases/tag/v2.6.2",
   "documentation_updated_on": "2026-11-24",
   "validation_history": {
     "1.1.0": {
@@ -598,27 +598,44 @@
         "macOS, Python 3.9, lark-oapi 1.8.0",
         "Linux, Python 3.10, lark-oapi 1.8.0"
       ]
+    },
+    "2.6.1": {
+      "version": "2.6.1",
+      "date": "2026-11-24",
+      "template_version": "2.0.0",
+      "scope": [
+        "Validate an enrolled prior worker’s original owner grant, exact plan, execution, artifact and self-test only for a directly linked dependency.",
+        "Do not treat a prior machine action as a human approval or acceptance. Retain a pending or inconsistent action for reconciliation."
+      ],
+      "status": "offline_regression_tested",
+      "observations": [
+        "Regression tests reject transferred or restored plans, detached dependencies, substituted accounts, missing evidence and invalid self-tests."
+      ],
+      "tests": 610,
+      "environments": [
+        "macOS, Python 3.9, lark-oapi 1.8.0",
+        "Linux, Python 3.10, lark-oapi 1.8.0"
+      ]
     }
   },
   "comment_reader_sha256": "c062a4046a0d8e679c0f94ede3070ae71bfe9851b850012e4a0984fb410bbea6",
-  "release_version": "2.6.1",
+  "release_version": "2.6.2",
   "skill_release_validation": {
-    "version": "2.6.1",
+    "version": "2.6.2",
     "date": "2026-11-24",
     "template_version": "2.0.0",
     "scope": [
-      "Validate an enrolled prior worker’s original owner grant, exact plan, execution, artifact and self-test only for a directly linked dependency.",
-      "Do not treat a prior machine action as a human approval or acceptance. Retain a pending or inconsistent action for reconciliation."
+      "Allow an explicitly enrolled human test acceptor to be added once to an empty field without replacing the original human scope confirmation."
     ],
     "status": "offline_regression_tested",
     "observations": [
-      "Regression tests reject transferred or restored plans, detached dependencies, substituted accounts, missing evidence and invalid self-tests."
+      "Both supported host test suites passed. Checks reject a missing grant, conflicting assignments, a different source revision or recipient, and attempts to replace an assigned human."
     ],
-    "tests": 610,
     "environments": [
       "macOS, Python 3.9, lark-oapi 1.8.0",
       "Linux, Python 3.10, lark-oapi 1.8.0"
-    ]
+    ],
+    "tests": 613
   },
   "source_at_packaging": {
     "template_version": "2.0.0",

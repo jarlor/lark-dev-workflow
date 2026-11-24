@@ -80,8 +80,11 @@ def location(project):
 
 
 def query(project, kind, role, record, *, prior_step=None):
-    require(kind in ('target', 'test', 'acceptance_plan', 'original_click', 'prior_action', 'owner_handoff') and role in ('requirements', 'work', 'bugs', 'verification'),
+    require(kind in ('target', 'test', 'acceptance_plan', 'original_click', 'prior_action', 'owner_handoff', 'acceptor_assignment') and role in ('requirements', 'work', 'bugs', 'verification'),
             '没有登记这种证据查询。')
+    if kind == 'acceptor_assignment':
+        require((role, project.key) in (('requirements', 'req-start'), ('bugs', 'bug-start')),
+                '只能按原始范围确认查询项目验收分工。')
     if kind == 'owner_handoff':
         require(role == 'work', '只有研发项可以核对负责人交接。')
     folder = location(project)
@@ -139,6 +142,10 @@ def query(project, kind, role, record, *, prior_step=None):
     if kind == 'original_click' and evidence.get('method') == 'archived_runner_history':
         import archived_identity
         archived_identity.source_hashes(evidence, hashes)
+    if kind == 'acceptor_assignment':
+        pair = [evidence.get(k) for k in ('authorization_sha256', 'assignment_sha256')]
+        require(all(isinstance(v, str) and v in hashes for v in pair) and pair[0] != pair[1],
+                '缺少负责人的原始授权或这条记录的分工材料。')
     if kind == 'owner_handoff':
         authorization, report = evidence.get('authorization_sha256'), evidence.get('report_sha256')
         require(authorization in hashes and report in hashes and authorization != report,

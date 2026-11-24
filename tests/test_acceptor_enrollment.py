@@ -57,6 +57,41 @@ class EnrollmentTests(unittest.TestCase):
         self.p.add_change('acceptor', '', self.person['name'], '研发助手')
         self.p.rows[0]['field_changes'][0]['field_type'] = 'User'
 
+    def assignment(self):
+        return dict(method='project_test_acceptor', project_record_id=self.p.project, table_id=self.p.table,
+                    record_id='recRow', field_id=self.p.fields['acceptor']['id'], role='requirements', revision=self.proof['business_revision'],
+                    confirmation_revision=self.proof['table_revision'], feedback_ids=['recFeedback'],
+                    authorizer_open_id=self.person['id'], confirmer_open_id=self.person['id'], acceptor_open_id='ou_qa')
+
+    def test_enrolled_human_can_test_without_changing_the_original_approval(self):
+        with mock.patch.object(enroll.stage_source, 'query', return_value=self.assignment()) as grant, \
+             mock.patch.object(enroll.confirmation, 'confirm_directory_user') as directory:
+            info = enroll.check('service.json', 'requirements', 'recRow', assigned=True)
+            self.assertEqual((info['status'], info['person_open_id']), ('ready_to_fill', 'ou_qa'))
+            self.p.row['acceptor'] = [dict(id='ou_qa', name='测试同事')]
+            self.p.add_change('acceptor', None, '测试同事', '研发助手')
+            self.p.rows[0]['field_changes'][0]['field_type'] = 'User'
+            self.assertEqual(self.original, self.history())
+            self.assertEqual(enroll.check('service.json', 'requirements', 'recRow', assigned=True)['status'], 'already_assigned')
+            self.assertTrue(all(call.args[-1]=='ou_qa' for call in directory.call_args_list))
+            grant.assert_called_with(self.p, 'acceptor_assignment', 'requirements', 'recRow')
+            self.p.rows[0]['field_changes'][0]['before'] = '之前的验收人'
+            with self.assertRaises(stage_action.Pending): self.history()
+
+    def test_delegation_never_retargets_other_rows_revisions_people_or_feedback(self):
+        for key, value in [('project_record_id','elsewhere'),('table_id','other'),('record_id','recElse'),
+                           ('field_id','fldOther'),('role','bugs'),('revision',True),('revision',self.proof['business_revision']+1),
+                           ('confirmation_revision',0),('authorizer_open_id','ou_unrelated'),
+                           ('confirmer_open_id','ou_unrelated'),('feedback_ids',[]),('method','from_comment'),
+                           ('acceptor_open_id',self.p.bot),('acceptor_open_id',self.person['id'])]:
+            grant = dict(self.assignment(), **{key:value})
+            with self.subTest(key=key,value=value), mock.patch.object(enroll.stage_source,'query',return_value=grant), self.assertRaises(stage_action.Pending):
+                enroll.check('service.json','requirements','recRow',assigned=True)
+        with mock.patch.object(enroll.stage_source,'query',return_value=self.assignment()), \
+             mock.patch.object(enroll.confirmation,'confirm_directory_user',side_effect=enroll.confirmation.Pending('not a person')), \
+             self.assertRaises(enroll.confirmation.Pending):
+            enroll.check('service.json','requirements','recRow',assigned=True)
+
     def test_preview_and_retry_then_exact_fill_preserves_original(self):
         first = self.preview()
         self.assertEqual((first['status'], first['person_open_id'], first['feedback_ids']),

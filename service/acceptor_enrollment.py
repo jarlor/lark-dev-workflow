@@ -7,6 +7,7 @@ import subprocess
 
 import stage_action
 import stage_business
+import stage_source
 import verify_confirmation as confirmation
 from onboard import OnboardingError
 from prepare_plan import ids
@@ -29,8 +30,8 @@ def native_creator(project, table, record):
     return raw['created_by'], raw['created_time'] // 1000
 
 
-def check_origin(adapter, role, record, row, proof):
-    """Verify every linked feedback, including independently assigned open IDs; never infer from names."""
+def confirmed_subject(adapter, role, record, row, proof):
+    """The original scope, its confirmer, project and linked feedback must still match."""
     project = adapter.p
     adapter.project_open()
     require(role in ROLES and proof.get('status') == 'verified' and proof.get('role') == role
@@ -49,6 +50,12 @@ def check_origin(adapter, role, record, row, proof):
     name = people[0]['name']
     linked = adapter.feedback(role, record)
     require(linked and len(linked) == len(set(linked)), '原反馈缺失或关联重复，暂时无法确定验收人。')
+    return person, name, linked
+
+
+def check_origin(adapter, role, record, row, proof):
+    project = adapter.p
+    person, name, linked = confirmed_subject(adapter, role, record, row, proof)
     feedback = adapter.tables['feedback']
     author = feedback['fields']['author']
     require(author['type'] in ('user', 'text'), '这张反馈表没有可核实的原作者字段。')
@@ -80,21 +87,46 @@ def check_origin(adapter, role, record, row, proof):
     return person, linked
 
 
+def assigned_person(adapter, role, record, row, proof):
+    """An explicit project assignment can fill an empty cell, never approve acceptance."""
+    project = adapter.p
+    confirmer, _, linked = confirmed_subject(adapter, role, record, row, proof)
+    grant = stage_source.query(project, 'acceptor_assignment', role, record)
+    require(grant.get('method') == 'project_test_acceptor'
+            and (grant.get('project_record_id'), grant.get('table_id'), grant.get('record_id'),
+                 grant.get('field_id'), grant.get('role'), grant.get('revision')) ==
+                (project.project, project.table, record, project.fields['acceptor']['id'], role, row['revision'])
+            and type(grant.get('revision')) is int and grant.get('authorizer_open_id') == grant.get('confirmer_open_id') == confirmer
+            and type(grant.get('confirmation_revision')) is int and grant['confirmation_revision'] == proof['table_revision']
+            and grant.get('feedback_ids') == sorted(linked), '项目的验收分工没有对应这条已确认的事项。')
+    person = grant.get('acceptor_open_id')
+    require(isinstance(person, str) and re.fullmatch(r'ou_[A-Za-z0-9_]{1,128}', person)
+            and person not in (project.bot, confirmer), '指定的验收人须是分工中的另一位真人。')
+    confirmation.confirm_directory_user(project.reader, person)
+    return person, linked
+
+
 def checked_change(project, role, record, row, proof, item):
     people = row['acceptor']
     changes = item.get('field_changes')
-    require(isinstance(changes, list) and len(changes) == 1 and ids(people) == [proof['operator_open_id']]
-            and ids(row['confirmer']) == ids(people) and isinstance(people[0].get('name'), str)
-            and people[0]['name'] == row['confirmer'][0].get('name')
+    require(isinstance(changes, list) and len(changes) == 1 and isinstance(people, list) and len(people) == 1
+            and isinstance(people[0], dict) and isinstance(people[0].get('name'), str) and people[0]['name'].strip()
             and changes[0].get('field_type') == 'User' and changes[0].get('before') in ('', None)
             and changes[0].get('field_id') == project.fields['acceptor']['id']
             and changes[0].get('after') == people[0]['name'] and type(item.get('create_time')) is int
             and item['create_time'] >= proof['update_time'] and item['rev'] > proof['table_revision'],
-            '只可核实从空栏一次补登原反馈人，已有验收人不能直接替换。')
-    check_origin(stage_business.Business(project.path, project.key), role, record, row, proof)
+            '只能补上空的验收人，不能换掉已分配的人。')
+    adapter = stage_business.Business(project.path, project.key)
+    if ids(people) == [proof['operator_open_id']]:
+        require(ids(row['confirmer']) == ids(people) and people[0]['name'] == row['confirmer'][0]['name'],
+                '补登原反馈人时，姓名和本人编号都必须一致。')
+        check_origin(adapter, role, record, row, proof)
+    else:
+        person, _ = assigned_person(adapter, role, record, row, proof)
+        require(ids(people) == [person], '实际填入的人与已登记的项目验收分工不同。')
 
 
-def check(config_path, role, record):
+def check(config_path, role, record, *, assigned=False):
     """Read-only in Feishu. Use the worker's existing ledger to verify the original approval."""
     require(role in ROLES and isinstance(record, str) and re.fullmatch(r'rec[A-Za-z0-9]+', record),
             '请指定需求或 Bug 的记录编号。')
@@ -105,7 +137,7 @@ def check(config_path, role, record):
     require(row['status'] in (['可研发'], ['研发中']), '只有确认后、送验前才可补登验收人。')
     proof = stage_business.confirmation_for(config_path, role, record)
     require(proof.get('status') == 'verified', proof.get('reason') or '这版范围还没有核实过的本人确认。')
-    person, linked = check_origin(adapter, role, record, row, proof)
+    person, linked = (assigned_person if assigned else check_origin)(adapter, role, record, row, proof)
     current = ids(row['acceptor'])
     require(current in ([], [person]), '该事项已经有其他验收人，请保留原分配。')
     project.check_binding()
@@ -121,9 +153,10 @@ def main():
     parser.add_argument('--config', required=True)
     parser.add_argument('--role', choices=ROLES, required=True)
     parser.add_argument('--record-id', required=True)
+    parser.add_argument('--assigned', action='store_true', help='按项目已登记的明确分工核实验收人。')
     args = parser.parse_args()
     try:
-        result = check(args.config, args.role, args.record_id)
+        result = check(args.config, args.role, args.record_id, assigned=args.assigned)
     except (stage_action.Pending, confirmation.Pending) as exc:
         result = dict(status='pending', reason=str(exc))
     except (OSError, ValueError, KeyError, TypeError, AttributeError, sqlite3.Error, subprocess.SubprocessError, OnboardingError):

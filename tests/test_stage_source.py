@@ -62,6 +62,28 @@ print(json.dumps({'request': q, 'sources': [source], 'evidence': evidence}))
         with self.assertRaisesRegex(stage_action.Pending, '已变化'):
             self.run_reader()
 
+    def test_assigned_acceptor_needs_two_real_distinct_sources_and_original_action(self):
+        authorization = self.reports / 'test-acceptor-policy'
+        authorization.write_bytes(b'Owner appointed a separate human to test this project.')
+        pin = hashlib.sha256(authorization.read_bytes()).hexdigest()
+        script = self.program.read_text().replace("evidence = {'report_sha256':",
+            "evidence = {'authorization_sha256': %r, 'assignment_sha256': %r, 'report_sha256':" % (pin, self.hash)
+        ).replace("'sources': [source]", "'sources': [source, %r]" % {'path':str(authorization),'sha256':pin})
+        with mock.patch.object(source, 'admin_path'):
+            def query(key='req-start',role='requirements'):
+                self.project.key = key
+                return source.query(self.project, 'acceptor_assignment', role, 'recSubject')
+            self.program.write_text(script)
+            self.registration['reader_sha256'] = hashlib.sha256(self.program.read_bytes()).hexdigest()
+            self.register()
+            self.assertEqual(query()['assignment_sha256'], self.hash)
+            for key,role in [('req-accept','requirements'),('req-start','work')]:
+                with self.assertRaises(stage_action.Pending): query(key,role)
+            self.program.write_text(script.replace(pin,self.hash,1))
+            self.registration['reader_sha256'] = hashlib.sha256(self.program.read_bytes()).hexdigest()
+            self.register()
+            with self.assertRaisesRegex(stage_action.Pending,'原始授权'): query()
+
     def test_owner_handoff_is_work_only_and_requires_distinct_verified_authorization_and_report(self):
         auth = self.reports / 'approval'
         auth.write_bytes(b'explicit authorization for this owner change')

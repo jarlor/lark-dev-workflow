@@ -208,7 +208,7 @@ def record_history(project, role, record, seal, row, current_values):
             elif fid is not None and fid == acceptor_field:
                 import acceptor_enrollment
                 require(stage in ('可研发', '研发中') and fid not in filed,
-                        '只能在送验前补登一次原反馈人。')
+                        '送验前只可从空栏补登一次已核实的验收人。')
                 acceptor_enrollment.checked_change(project, role, record, row, proof, item)
                 filed[fid] = []
             elif fid in note_fields:
